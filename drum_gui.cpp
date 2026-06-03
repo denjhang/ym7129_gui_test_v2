@@ -21,6 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdarg.h>
+#include <string>
 
 extern "C" {
 #include "spfm.h"
@@ -70,6 +72,29 @@ static uint8_t g_slot = 0;
 static int     g_volume = 0;
 static int     g_delay_us = 80;
 static float   g_hitAnim[12] = {};
+
+// ============================================================
+// Log component (ported from DMPlayer ym2163)
+// ============================================================
+static std::string g_logBuffer;
+static bool        g_logAutoScroll = true;
+static bool        g_logScrollToBottom = false;
+static size_t      g_logLastSize = 0;
+static char        g_logDisplay[65536] = "";
+static bool        g_logExpanded = false;
+
+static void log_cmd(const char* fmt, ...) {
+    char buf[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    g_logBuffer += buf;
+    g_logBuffer += "\n";
+    if (g_logBuffer.size() > 64000)
+        g_logBuffer = g_logBuffer.substr(g_logBuffer.size() - 32000);
+    g_logScrollToBottom = true;
+}
 
 // ============================================================
 // DX11 globals
@@ -164,6 +189,7 @@ static void strike_drum(int idx) {
     // Re-init chip before each strike (same as ym7129_drum_all.c)
     ym7129_init(g_slot);
     spfm_flush();
+    log_cmd("Strike: %s (Rhy=%d L/H=%d Vol=%d)", p->name, p->rhy_type, p->lh, g_volume);
     ym7129_drum_strike(g_slot, p->channel, p->rhy_type, p->lh, (uint8_t)g_volume);
     g_hitAnim[idx] = 1.0f;
 }
@@ -182,6 +208,7 @@ static void on_key_down(int vk) {
 static void do_connect() {
     if (g_connected) return;
     if (spfm_init(0) != 0) {
+        log_cmd("ERROR: Cannot open SPFM device!");
         MessageBox(g_hWnd, "Cannot open SPFM device!", "Error", MB_OK | MB_ICONERROR);
         return;
     }
@@ -189,6 +216,7 @@ static void do_connect() {
     ym7129_set_write_delay((uint32_t)g_delay_us);
     ym7129_init(g_slot);
     Sleep(100);
+    log_cmd("Connected (delay=%dus)", g_delay_us);
 }
 
 static void do_disconnect() {
@@ -198,6 +226,7 @@ static void do_disconnect() {
     Sleep(50);
     spfm_cleanup();
     g_connected = false;
+    log_cmd("Disconnected");
 }
 
 static void do_reset() {
@@ -206,6 +235,7 @@ static void do_reset() {
     ym7129_drum_mute(g_slot);
     Sleep(50);
     ym7129_init(g_slot);
+    log_cmd("Reset");
 }
 
 // ============================================================
@@ -285,6 +315,53 @@ static void RenderDrumPad() {
 }
 
 // ============================================================
+// Log window (ported from DMPlayer gui_renderer_impl.cpp)
+// ============================================================
+static void RenderLog() {
+    ImGui::SetNextWindowSize(ImVec2(380, 200), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Log")) { ImGui::End(); return; }
+
+    if (ImGui::CollapsingHeader("Log", g_logExpanded ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+        g_logExpanded = true;
+        ImGui::SameLine();
+        ImGui::Checkbox("Auto-scroll", &g_logAutoScroll);
+        ImGui::SameLine();
+        if (ImGui::Button("Clear##Log")) {
+            g_logBuffer.clear();
+            g_logDisplay[0] = '\0';
+            g_logLastSize = 0;
+        }
+
+        size_t copyLen = (g_logBuffer.length() < sizeof(g_logDisplay) - 1) ?
+                         g_logBuffer.length() : sizeof(g_logDisplay) - 1;
+        memcpy(g_logDisplay, g_logBuffer.c_str(), copyLen);
+        g_logDisplay[copyLen] = '\0';
+
+        bool log_changed = (g_logBuffer.length() != g_logLastSize);
+        g_logLastSize = g_logBuffer.length();
+        if (g_logAutoScroll && log_changed) g_logScrollToBottom = true;
+
+        float logHeight = 150;
+        ImGui::BeginChild("LogScrollRegion", ImVec2(0, logHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
+        ImVec2 text_size = ImGui::CalcTextSize(g_logDisplay, NULL, false, -1.0f);
+        float line_height = ImGui::GetTextLineHeightWithSpacing();
+        float min_visible_height = ImGui::GetContentRegionAvail().y;
+        float input_height = (text_size.y > min_visible_height) ? text_size.y + line_height * 2 : min_visible_height;
+        ImGui::InputTextMultiline("##LogText", g_logDisplay, sizeof(g_logDisplay),
+            ImVec2(-1, input_height), ImGuiInputTextFlags_ReadOnly);
+        if (g_logScrollToBottom) {
+            ImGui::SetScrollY(ImGui::GetScrollMaxY());
+            g_logScrollToBottom = false;
+        }
+        ImGui::EndChild();
+    } else {
+        g_logExpanded = false;
+    }
+
+    ImGui::End();
+}
+
+// ============================================================
 // WinMain
 // ============================================================
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
@@ -325,7 +402,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.IniFilename = NULL;
+    // Save imgui.ini next to executable for reliable layout persistence
+    {
+        wchar_t wbuf[MAX_PATH];
+        GetModuleFileNameW(NULL, wbuf, MAX_PATH);
+        wchar_t* lastSlash = wcsrchr(wbuf, L'\\');
+        if (lastSlash) { wcscpy(lastSlash + 1, L"imgui.ini"); }
+        char inipath[MAX_PATH];
+        snprintf(inipath, sizeof(inipath), "%S", wbuf);
+        io.IniFilename = strdup(inipath);
+    }
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable
                     | ImGuiConfigFlags_ViewportsEnable;
     io.ConfigViewportsNoDecoration = false;
@@ -436,6 +522,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
         // Render child windows
         RenderDrumPad();
+        RenderLog();
 
         ImGui::End(); // ##DockSpaceHost
 
