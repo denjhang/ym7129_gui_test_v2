@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // ============================================================
 // YM7129 (OPK) Register Map
 // Analyzed by madscient. Reference: opk_register html/Sheet1.html
@@ -130,5 +134,9 @@ void ym7129_drum_strike(uint8_t slot, uint8_t channel, uint8_t rhy_type, uint8_t
 
 // Drum mute: set $84 all bits to 0
 void ym7129_drum_mute(uint8_t slot);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* YM7129_H */

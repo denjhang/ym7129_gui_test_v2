@@ -143,7 +143,7 @@ static void piano_key_down(int note, int octave) {
     int ch = ym7129_play_note(g_slot, midi_note, 100);
     if (midi_note >= 0 && midi_note < 128) {
         g_pianoChPlaying[midi_note] = ch;
-        g_pianoLevel[midi_note] = 1.0f;
+        g_pianoLevel[midi_note] = 1.0f; // will be held at 1.0 while key is pressed
     }
     log_cmd("Piano ON: ch=%d midi=%d", ch, midi_note);
 }
@@ -151,10 +151,8 @@ static void piano_key_down(int note, int octave) {
 static void piano_key_up(int note, int octave) {
     if (!g_connected) return;
     int midi_note = (octave + 2) * 12 + note;
-    if (midi_note >= 0 && midi_note < 128) {
-        g_pianoChPlaying[midi_note] = -1;
-        g_pianoLevel[midi_note] = 0.0f;
-    }
+    // Don't clear visual state here — let the decay loop fade out
+    // (same as DMPlayer: UpdateChannelLevels handles fadeout)
     ym7129_stop_note(g_slot, midi_note);
 }
 
@@ -525,18 +523,17 @@ static void RenderPiano() {
 
     ImGui::EndChild();
 
-    // FM voice parameter sliders (furnace-style table layout)
-    // Columns: Label | AR DR SL RR | TL ML  (MOD row, CAR row)
-    // Plus FB as separate small control
+    // ============================================================
+    // FM voice parameters (furnace YM2413 OPLL style)
+    // ============================================================
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
-    float sliderH = 80.0f;
-    ImVec2 sliderSize(20.0f, sliderH);
-
-    // Extract params into editable ints
+    // Extract params
     int fb  = g_fmPatch.feedback_lr & 0x07;
+    bool l_on = (g_fmPatch.feedback_lr >> 5) & 1;
+    bool r_on = (g_fmPatch.feedback_lr >> 6) & 1;
     int m_ar = (g_fmPatch.m_ardr >> 4) & 0x0F;
     int m_dr = g_fmPatch.m_ardr & 0x0F;
     int m_sl = (g_fmPatch.m_slrr >> 4) & 0x0F;
@@ -544,150 +541,227 @@ static void RenderPiano() {
     int m_tl = g_fmPatch.m_tl & 0x7F;
     int m_ml = g_fmPatch.m_mlws & 0x0F;
     int c_ar = (g_fmPatch.c_ardr >> 4) & 0x0F;
-    int c_dr = g_fmPatch.c_ardr & 0x0F;
+    int c_dr = (g_fmPatch.c_ardr & 0x0F);
     int c_sl = (g_fmPatch.c_slrr >> 4) & 0x0F;
     int c_rr = g_fmPatch.c_slrr & 0x0F;
     int c_tl = g_fmPatch.c_tl & 0x7F;
     int c_ml = g_fmPatch.c_mlws & 0x0F;
-
-    bool changed = false;
-
-    // Helper: vertical slider with label above, value below (furnace style)
-    auto vslider = [&](const char* label, int* val, int vmin, int vmax) {
-        ImGui::TableNextColumn();
-        ImGui::Text("%s", label);
-        ImGui::TableNextColumn();
-        ImGui::PushID(label);
-        if (ImGui::VSliderInt("##v", sliderSize, val, vmin, vmax)) changed = true;
-        ImGui::PopID();
-        ImGui::TableNextColumn();
-        ImGui::Text("%d", *val);
-    };
-
-    // Helper: draw ADSR envelope preview (from furnace drawFMEnv, simplified for YM7129)
-    auto drawADSR = [&](int ar, int dr, int sl, int rr, int tl_val, int maxTl, ImVec2 size, ImU32 color) {
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        ImVec2 p = ImGui::GetCursorScreenPos();
-        ImRect rect(p, ImVec2(p.x + size.x, p.y + size.y));
-        dl->AddRectFilled(rect.Min, rect.Max, IM_COL32(30, 30, 40, 255));
-        dl->AddRect(rect.Min, rect.Max, IM_COL32(80, 80, 80, 255));
-        if (ar == 0) return;
-        // ADSR x positions (time)
-        float arF = (float)(15 - ar) / 15.0f;
-        float drF = arF + (sl / 15.0f) * ((float)(15 - dr) / 15.0f);
-        float rrF = (float)(15 - rr) / 15.0f;
-        arF /= 2.0f; drF /= 2.0f;
-        float tlN = (maxTl > 0) ? (float)(maxTl - tl_val) / maxTl : 1.0f;
-        float slN = tlN + (sl / 15.0f) * (1.0f - tlN);
-        // Points: bottom-left → AR peak → SL level → ground
-        ImVec2 p0(p.x, p.y + size.y);                                    // bottom-left
-        ImVec2 p1(p.x + arF * size.x, p.y + (1.0f - tlN) * size.y);    // AR peak
-        ImVec2 p2(p.x + drF * size.x, p.y + (1.0f - slN) * size.y);    // DR end (SL level)
-        ImVec2 p3(p.x + drF * size.x, p.y + size.y);                    // sustain level to bottom
-        ImVec2 p4(p.x + (drF + rrF) * size.x, p.y + size.y);             // RR end
-        // Sustain guide lines
-        dl->AddLine(ImVec2(p2.x, p2.y), ImVec2(p.x + size.x, p2.y), IM_COL32(80, 80, 80, 128));
-        dl->AddLine(p2, p3, IM_COL32(80, 80, 80, 128));
-        // Envelope: AR → DR → sustain ground
-        dl->AddLine(p0, p1, color);
-        dl->AddLine(p1, p2, color);
-        dl->AddLine(p2, p3, color);
-        // Release triangle (shaded)
-        ImVec2 pRS(p.x, p.y + (1.0f - tlN) * size.y);
-        dl->AddTriangleFilled(pRS, p4, p0, IM_COL32(40, 40, 50, 128));
-    };
-
-    // Helper: draw waveform preview (sine or half-sine based on WS bit)
-    auto drawWaveform = [&](bool ws, ImVec2 size, ImU32 color) {
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        ImVec2 p = ImGui::GetCursorScreenPos();
-        ImRect rect(p, ImVec2(p.x + size.x, p.y + size.y));
-        dl->AddRectFilled(rect.Min, rect.Max, IM_COL32(30, 30, 40, 255));
-        dl->AddRect(rect.Min, rect.Max, IM_COL32(80, 80, 80, 255));
-        int steps = (int)size.x;
-        if (steps < 2) return;
-        float midY = p.y + size.y * 0.5f;
-        float amp = size.y * 0.4f;
-        for (int i = 0; i < steps; i++) {
-            float t = (float)i / steps * 2.0f * 3.14159265f;
-            float val = ws ? fabsf(sinf(t)) : sinf(t); // ws=0: sine, ws=1: half-sine
-            float y1 = midY - val * amp;
-            float y2 = midY - val * amp;
-            if (i < steps - 1) {
-                float t2 = (float)(i + 1) / steps * 2.0f * 3.14159265f;
-                float val2 = ws ? fabsf(sinf(t2)) : sinf(t2);
-                y2 = midY - val2 * amp;
-                dl->AddLine(ImVec2(p.x + i, y1), ImVec2(p.x + i + 1, y2), color);
-            }
-        }
-    };
-
-    // FB + L/R row
-    ImGui::Text("FB"); ImGui::SameLine();
-    if (ImGui::VSliderInt("##FB", ImVec2(20.0f, sliderH), &fb, 0, 7)) changed = true;
-    ImGui::SameLine(0, 8);
-    bool l_on = (g_fmPatch.feedback_lr >> 5) & 1;
-    bool r_on = (g_fmPatch.feedback_lr >> 6) & 1;
-    if (ImGui::Checkbox("L", &l_on)) changed = true;
-    ImGui::SameLine();
-    if (ImGui::Checkbox("R", &r_on)) changed = true;
-    ImGui::SameLine(0, 12);
-
-    // Waveform + ADSR previews
     int m_ws = (g_fmPatch.m_mlws >> 5) & 1;
     int c_ws = (g_fmPatch.c_mlws >> 5) & 1;
-    bool m_ws_b = m_ws != 0;
-    bool c_ws_b = c_ws != 0;
-    ImGui::BeginGroup();
-    ImGui::Text("MOD");
-    drawWaveform(m_ws != 0, ImVec2(60, sliderH), IM_COL32(100, 255, 100, 255));
-    ImGui::SameLine();
-    drawADSR(m_ar, m_dr, m_sl, m_rr, m_tl, 127, ImVec2(60, sliderH), IM_COL32(100, 255, 100, 255));
-    if (ImGui::Checkbox("WS", &m_ws_b)) { m_ws = m_ws_b ? 1 : 0; changed = true; }
-    ImGui::EndGroup();
-    ImGui::SameLine(0, 12);
-    ImGui::BeginGroup();
-    ImGui::Text("CAR");
-    drawWaveform(c_ws != 0, ImVec2(60, sliderH), IM_COL32(100, 150, 255, 255));
-    ImGui::SameLine();
-    drawADSR(c_ar, c_dr, c_sl, c_rr, c_tl, 127, ImVec2(60, sliderH), IM_COL32(100, 150, 255, 255));
-    if (ImGui::Checkbox("WS", &c_ws_b)) { c_ws = c_ws_b ? 1 : 0; changed = true; }
-    ImGui::EndGroup();
-    ImGui::SameLine(0, 12);
 
-    // FM Operators table: 2 rows (MOD, CAR) x columns (AR DR SL RR | TL ML)
-    // Columns: label, slider, val  x 6 params = 18 columns
-    if (ImGui::BeginTable("FMParams", 18, ImGuiTableFlags_SizingFixedFit)) {
-        for (int c = 0; c < 6; c++)
-            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 22.0f + 4.0f);
-        ImGui::TableHeadersRow();
+    bool changed_fm = false;
 
-        // Row 0: MOD
+    // --- Top table: FB, L/R, Algorithm info (furnace fmDetails) ---
+    if (ImGui::BeginTable("fmDetails", 3, ImGuiTableFlags_SizingStretchSame)) {
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
-        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "MOD");
-        vslider("AR", &m_ar, 0, 15);
-        vslider("DR", &m_dr, 0, 15);
-        vslider("SL", &m_sl, 0, 15);
-        vslider("RR", &m_rr, 0, 15);
-        vslider("TL", &m_tl, 0, 127);
-        vslider("ML", &m_ml, 0, 15);
-
-        // Row 1: CAR
-        ImGui::TableNextRow();
+        if (ImGui::SliderInt("FB", &fb, 0, 7)) changed_fm = true;
+        ImGui::SameLine();
+        if (ImGui::Checkbox("L", &l_on)) changed_fm = true;
+        ImGui::SameLine();
+        if (ImGui::Checkbox("R", &r_on)) changed_fm = true;
         ImGui::TableNextColumn();
-        ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "CAR");
-        vslider("AR", &c_ar, 0, 15);
-        vslider("DR", &c_dr, 0, 15);
-        vslider("SL", &c_sl, 0, 15);
-        vslider("RR", &c_rr, 0, 15);
-        vslider("TL", &c_tl, 0, 127);
-        vslider("ML", &c_ml, 0, 15);
+        ImGui::TextDisabled("YM7129 2-OP FM");
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("MOD->CAR");
+        ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+
+    // --- Operator table (furnace FMOperators) ---
+    // Columns: OP | AR | DR | SL | RR | sep | TL | ML | WS | sep | Wave | Env
+    int numCols = 12;
+    int numOps = 2;
+    float sliderH = 80.0f;
+    ImVec2 sliderSz(20.0f, sliderH);
+
+    // Helper: center slider in column (furnace CENTER_VSLIDER)
+    auto centerVSlider = [&]() {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x * 0.5f - sliderSz.x * 0.5f);
+    };
+
+    // Helper: draw waveform preview inside a BeginChild
+    auto drawWaveformChild = [&](const char* id, bool ws, ImU32 color) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImVec2 childSz(avail.x, sliderH);
+        ImGui::BeginChild(id, childSz, ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 wp = ImGui::GetWindowPos();
+        ImVec2 wsz = ImGui::GetWindowSize();
+        ImRect rect(wp, ImVec2(wp.x + wsz.x, wp.y + wsz.y));
+        dl->AddRectFilled(rect.Min, rect.Max, IM_COL32(20, 20, 30, 255));
+        int steps = (int)wsz.x;
+        if (steps >= 2) {
+            float midY = wp.y + wsz.y * 0.5f, amp = wsz.y * 0.4f;
+            for (int i = 0; i < steps; i++) {
+                float t = (float)i / steps * 3.14159265f * 2.0f;
+                float v1 = ws ? fabsf(sinf(t)) : sinf(t);
+                float t2 = (float)(i + 1) / steps * 3.14159265f * 2.0f;
+                float v2 = ws ? fabsf(sinf(t2)) : sinf(t2);
+                dl->AddLine(ImVec2(wp.x + i, midY - v1 * amp), ImVec2(wp.x + i + 1, midY - v2 * amp), color);
+            }
+        }
+        ImGui::EndChild();
+    };
+
+    // Helper: draw ADSR envelope preview inside a BeginChild (furnace drawFMEnv)
+    auto drawADSRChild = [&](const char* id, int ar, int dr, int sl, int rr, int tl_val, int maxTl, ImU32 color) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImVec2 childSz(avail.x, sliderH);
+        ImGui::BeginChild(id, childSz, ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 wp = ImGui::GetWindowPos();
+        ImVec2 wsz = ImGui::GetWindowSize();
+        ImRect rect(wp, ImVec2(wp.x + wsz.x, wp.y + wsz.y));
+        dl->AddRectFilled(rect.Min, rect.Max, IM_COL32(20, 20, 30, 255));
+
+        if (ar > 0) {
+            // Furnace drawFMEnv exact formulas (maxArDr=15, maxRr=15, YM7129 has no D2R)
+            float arPos = (float)(15 - ar) / 15.0f;
+            float drPos = arPos + ((sl / 15.0f) * (float)(15 - dr) / 15.0f);
+            float rrPos = (float)(15 - rr) / 15.0f;
+            arPos /= 2.0f;
+            drPos /= 2.0f;
+
+            float tlN = (maxTl > 0) ? (float)(maxTl - tl_val) / (float)maxTl : 1.0f;
+            float slY = tlN + (sl / 15.0f) - (tlN * (sl / 15.0f));
+
+            ImVec2 pos1 = ImLerp(rect.Min, rect.Max, ImVec2(0.0f, 1.0f));
+            ImVec2 pos2 = ImLerp(rect.Min, rect.Max, ImVec2(arPos, tlN));
+            ImVec2 pos3 = ImLerp(rect.Min, rect.Max, ImVec2(drPos, slY));
+            ImVec2 pos4 = ImLerp(rect.Min, rect.Max, ImVec2(drPos, 1.0f));
+            ImVec2 posREnd = ImLerp(rect.Min, rect.Max, ImVec2(rrPos, 1.0f));
+            ImVec2 posRStart = ImLerp(rect.Min, rect.Max, ImVec2(0.0f, tlN));
+            ImVec2 posSLineHEnd = ImLerp(rect.Min, rect.Max, ImVec2(1.0f, slY));
+            ImVec2 posSLineVEnd = ImLerp(rect.Min, rect.Max, ImVec2(drPos, 1.0f));
+
+            dl->AddTriangleFilled(posRStart, posREnd, pos1, IM_COL32(40, 40, 50, 128));
+            dl->AddLine(ImLerp(rect.Min, rect.Max, ImVec2(drPos, slY)), posSLineHEnd, IM_COL32(60, 60, 60, 128));
+            dl->AddLine(pos3, posSLineVEnd, IM_COL32(60, 60, 60, 128));
+            dl->AddLine(pos1, pos2, color, 1.5f);
+            dl->AddLine(pos2, pos3, color, 1.5f);
+            dl->AddLine(pos3, pos4, color, 1.5f);
+        }
+        ImGui::EndChild();
+    };
+
+    if (ImGui::BeginTable("FMOperators", numCols, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Borders | ImGuiTableFlags_BordersV)) {
+        // Column setup (furnace: WidthFixed for name/sep, WidthStretch for sliders)
+        ImGui::TableSetupColumn("OP",   ImGuiTableColumnFlags_WidthFixed);              // 0
+        ImGui::TableSetupColumn("AR",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 1
+        ImGui::TableSetupColumn("DR",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 2
+        ImGui::TableSetupColumn("SL",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 3
+        ImGui::TableSetupColumn("RR",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 4
+        ImGui::TableSetupColumn("s1",   ImGuiTableColumnFlags_WidthFixed);              // 5
+        ImGui::TableSetupColumn("TL",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 6
+        ImGui::TableSetupColumn("ML",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 7
+        ImGui::TableSetupColumn("WS",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 8
+        ImGui::TableSetupColumn("s2",   ImGuiTableColumnFlags_WidthFixed);              // 9
+        ImGui::TableSetupColumn("Wave", ImGuiTableColumnFlags_WidthStretch, 0.15f);    // 10
+        ImGui::TableSetupColumn("Env",  ImGuiTableColumnFlags_WidthStretch, 0.15f);    // 11
+
+        // Header row — center text in slider columns to align with sliders below
+        auto centerText = [&]() {
+            ImVec2 textSize = ImGui::CalcTextSize("XX");
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x * 0.5f - textSize.x * 0.5f);
+        };
+
+        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+        ImGui::TableNextColumn(); ImGui::Text("OP");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("AR");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("DR");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("SL");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("RR");
+        ImGui::TableNextColumn(); // sep
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("TL");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("ML");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("WS");
+        ImGui::TableNextColumn(); // sep
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("Wave");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("Env");
+
+        // Data: 2 operator rows
+        struct OpData { const char* name; int* ar; int* dr; int* sl; int* rr; int* tl; int* ml; int* ws; ImU32 color; };
+        OpData ops[2] = {
+            {"MOD", &m_ar, &m_dr, &m_sl, &m_rr, &m_tl, &m_ml, &m_ws, IM_COL32(100,255,100,255)},
+            {"CAR", &c_ar, &c_dr, &c_sl, &c_rr, &c_tl, &c_ml, &c_ws, IM_COL32(100,150,255,255)},
+        };
+
+        for (int i = 0; i < numOps; i++) {
+            OpData& o = ops[i];
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", o.name);
+
+            // AR
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10);
+            if (ImGui::VSliderInt("##AR", sliderSz, o.ar, 0, 15)) changed_fm = true;
+            ImGui::PopID();
+
+            // DR
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10 + 1);
+            if (ImGui::VSliderInt("##DR", sliderSz, o.dr, 0, 15)) changed_fm = true;
+            ImGui::PopID();
+
+            // SL
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10 + 2);
+            if (ImGui::VSliderInt("##SL", sliderSz, o.sl, 0, 15)) changed_fm = true;
+            ImGui::PopID();
+
+            // RR
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10 + 3);
+            if (ImGui::VSliderInt("##RR", sliderSz, o.rr, 0, 15)) changed_fm = true;
+            ImGui::PopID();
+
+            // sep
+            ImGui::TableNextColumn();
+
+            // TL
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10 + 4);
+            if (ImGui::VSliderInt("##TL", sliderSz, o.tl, 0, 127)) changed_fm = true;
+            ImGui::PopID();
+
+            // ML
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10 + 5);
+            if (ImGui::VSliderInt("##ML", sliderSz, o.ml, 0, 15)) changed_fm = true;
+            ImGui::PopID();
+
+            // WS
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10 + 6);
+            if (ImGui::VSliderInt("##WS", sliderSz, o.ws, 0, 1)) changed_fm = true;
+            ImGui::PopID();
+
+            // sep
+            ImGui::TableNextColumn();
+
+            // sep
+            ImGui::TableNextColumn();
+
+            // Wave preview (each op row has its own)
+            ImGui::TableNextColumn();
+            ImGui::PushID(i * 100 + 0);
+            drawWaveformChild("##wav", *o.ws != 0, o.color);
+            ImGui::PopID();
+
+            // ADSR preview (each op row has its own)
+            ImGui::TableNextColumn();
+            ImGui::PushID(i * 100 + 1);
+            drawADSRChild("##env", *o.ar, *o.dr, *o.sl, *o.rr, *o.tl, 127, o.color);
+            ImGui::PopID();
+        }
 
         ImGui::EndTable();
     }
 
-    if (changed) {
+    if (changed_fm) {
         g_fmPatch.feedback_lr = (fb & 0x07) | (l_on ? (1<<5) : 0) | (r_on ? (1<<6) : 0);
         g_fmPatch.m_ardr = ((m_ar & 0x0F) << 4) | (m_dr & 0x0F);
         g_fmPatch.m_slrr = ((m_sl & 0x0F) << 4) | (m_rr & 0x0F);
@@ -826,7 +900,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         }
         for (int i = 0; i < 128; i++) {
             if (g_pianoLevel[i] > 0.0f) {
-                g_pianoLevel[i] -= dt * 4.0f;
+                // Decay only after key release (key down keeps level at 1.0 via WM_KEYDOWN repeat guard)
+                // Decay speed: ~0.3s to fade out (same feel as FM release)
+                g_pianoLevel[i] -= dt * 3.0f;
                 if (g_pianoLevel[i] < 0.0f) g_pianoLevel[i] = 0.0f;
                 if (g_pianoLevel[i] <= 0.0f && g_pianoChPlaying[i] >= 0) {
                     g_pianoChPlaying[i] = -1;

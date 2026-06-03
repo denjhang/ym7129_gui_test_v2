@@ -1,30 +1,34 @@
 # YM7129 Drum Pad GUI Makefile (ImGui + DX11)
-CC      = g++
-CFLAGS  = -Wall -O2 -I. -Iimgui -mwindows
-LDFLAGS = -L. -lftd2xx -lws2_32 -ld3d11 -ldxgi -ld3dcompiler -mwindows
+BUILDDIR = build
+CC       = g++
+CFLAGS   = -Wall -O2 -I. -Iimgui -mwindows
+LDFLAGS  = -L. -lftd2xx -lws2_32 -ld3d11 -ldxgi -ld3dcompiler -ldwmapi -mwindows
 
 IMGUI_SRCS = imgui/imgui.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp \
              imgui/imgui_widgets.cpp imgui/imgui_impl_win32.cpp imgui/imgui_impl_dx11.cpp
-IMGUI_OBJS = $(IMGUI_SRCS:.cpp=.o)
+IMGUI_OBJS = $(patsubst %.cpp,$(BUILDDIR)/%.o,$(IMGUI_SRCS))
 
-OBJS = drum_gui.o ym7129.o spfm_lite.o error_lite.o $(IMGUI_OBJS)
-TARGET = drum_gui.exe
+OBJS = $(BUILDDIR)/drum_gui.o $(BUILDDIR)/ym7129.o $(BUILDDIR)/spfm_lite.o $(BUILDDIR)/error_lite.o $(IMGUI_OBJS)
+TARGET = $(BUILDDIR)/drum_gui.exe
 
-all: $(TARGET)
+all: ensure_dirs $(TARGET)
+
+ensure_dirs:
+	@mkdir -p $(BUILDDIR)/imgui 2>/dev/null; test -d $(BUILDDIR)/imgui || mkdir $(BUILDDIR) $(BUILDDIR)/imgui
 
 $(TARGET): $(OBJS)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
-%.o: %.cpp
+$(BUILDDIR)/%.o: %.cpp
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-%.o: %.c
+$(BUILDDIR)/%.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-imgui/%.o: imgui/%.cpp
+$(BUILDDIR)/%.o: imgui/%.cpp
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	del /Q *.o $(TARGET) imgui\*.o 2>/dev/null
+	del /Q $(BUILDDIR)\\*.o $(TARGET) 2>/dev/null
 
 .PHONY: all clean
