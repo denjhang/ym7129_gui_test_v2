@@ -45,21 +45,21 @@ static const drum_pad_t DRUM_PADS[12] = {
     { "C.HH H", 2, 0, 0 }, { "C.HH L", 2, 1, 0 },
     { "O.HH H", 3, 0, 0 }, { "O.HH L", 3, 1, 0 },
     { "Tom H",  4, 0, 0 }, { "Tom L",  4, 1, 0 },
-    { "Ride H", 5, 0, 1 }, { "Ride L", 5, 1, 1 },
+    { "Ride H", 5, 0, 0 }, { "Ride L", 5, 1, 0 },
+};
+
+// VK mapping: 0., 12, 45, 78, */-, +  (6 groups x 2 keys)
+static const int PAD_VK[12] = {
+    VK_NUMPAD0, 0x6E, /* VK_DECIMAL */
+    VK_NUMPAD1, VK_NUMPAD2,
+    VK_NUMPAD4, VK_NUMPAD5,
+    VK_NUMPAD7, VK_NUMPAD8,
+    VK_MULTIPLY, VK_SUBTRACT,
+    VK_DIVIDE,   VK_ADD,
 };
 
 static const char *PAD_KEYNAMES[12] = {
-    "0","1","2","3","4","5","7","8","Num*","Num-","Num/","Num+"
-};
-
-// Win32 VK key codes for drum pads
-static const int PAD_VK[12] = {
-    '0', '1',
-    '2', '3',
-    '4', '5',
-    '7', '8',
-    VK_MULTIPLY, VK_SUBTRACT,
-    VK_DIVIDE, VK_ADD,
+    "0.",".","1","2","4","5","7","8","*","-","/","+"
 };
 
 static void on_key_down(int vk); // forward declaration, defined after strike_drum
@@ -310,7 +310,7 @@ static void RenderDrumPad() {
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("[ ] = Volume   Keys: 0-5,7,8,Num*,Num-,Num/,Num+");
+    ImGui::TextDisabled("[ ] = Volume   Keys: Num0-5,7,8,Num*,Num-,Num/,Num+");
     ImGui::End();
 }
 
