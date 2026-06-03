@@ -63,6 +63,7 @@ static const char *PAD_KEYNAMES[12] = {
 };
 
 static void on_key_down(int vk); // forward declaration, defined after strike_drum
+static void on_key_up(int vk);   // forward declaration
 
 // ============================================================
 // State
@@ -70,6 +71,7 @@ static void on_key_down(int vk); // forward declaration, defined after strike_dr
 static bool    g_connected = false;
 static uint8_t g_slot = 0;
 static int     g_volume = 0;
+static bool    g_keyStates[256] = {};
 static int     g_delay_us = 80;
 static float   g_hitAnim[12] = {};
 
@@ -94,6 +96,66 @@ static void log_cmd(const char* fmt, ...) {
     if (g_logBuffer.size() > 64000)
         g_logBuffer = g_logBuffer.substr(g_logBuffer.size() - 32000);
     g_logScrollToBottom = true;
+}
+
+// ============================================================
+// Piano keyboard (from DMPlayer YM2163 key mapping)
+// ============================================================
+typedef struct { int vk; int note; int octave_offset; } KeyMapping;
+static const KeyMapping g_pianoKeyMappings[] = {
+    {'Z', 0, 0}, {'X', 2, 0}, {'C', 4, 0}, {'V', 5, 0}, {'B', 7, 0}, {'N', 9, 0}, {'M', 11, 0},
+    {VK_OEM_COMMA, 0, 1}, {VK_OEM_PERIOD, 2, 1}, {VK_OEM_2, 4, 1},
+    {'S', 1, 0}, {'D', 3, 0}, {'G', 6, 0}, {'H', 8, 0}, {'J', 10, 0}, {'K', 1, 1}, {'L', 3, 1},
+    {'Q', 0, 1}, {'W', 2, 1}, {'E', 4, 1}, {'R', 5, 1}, {'T', 7, 1}, {'Y', 9, 1}, {'U', 11, 1},
+    {'I', 0, 2}, {'O', 2, 2}, {'P', 4, 2}, {VK_OEM_4, 5, 2}, {VK_OEM_6, 7, 2},
+    {'2', 1, 1}, {'3', 3, 1}, {'5', 6, 1}, {'6', 8, 1}, {'7', 10, 1},
+    {'8', 1, 2}, {'9', 3, 2}, {'0', 6, 2},
+};
+static const int g_numPianoKeys = sizeof(g_pianoKeyMappings) / sizeof(KeyMapping);
+static const bool g_isBlackNote[12] = {false, true, false, true, false, false, true, false, true, false, true, false};
+
+static int   g_currentOctave = 2; // Z=C4 (same as DMPlayer)
+static int   g_pianoChPlaying[128] = {};  // indexed by MIDI note, -1=none
+static float g_pianoLevel[128] = {};
+
+// Editable FM patch (start with simple sine-like tone)
+static ym7129_patch_t g_fmPatch = {
+    0x60, // feedback_lr: L+R, FB=0
+    0x00, // m_mlws: KON=0, ML=0
+    0xFF, // m_tl: mute
+    0x00, // m_ardr
+    0x00, // m_slrr
+    0x0D, // c_mlws: KON=0, ML=13
+    0x30, // c_tl: volume
+    0x58, // c_ardr: AR=5, DR=8
+    0x0B, // c_slrr: SL=0, RR=11
+};
+
+static void reload_fm_patch() {
+    if (!g_connected) return;
+    for (int ch = 0; ch < 8; ch++)
+        ym7129_load_patch(g_slot, ch, &g_fmPatch);
+}
+
+static void piano_key_down(int note, int octave) {
+    if (!g_connected) return;
+    int midi_note = (octave + 2) * 12 + note;
+    int ch = ym7129_play_note(g_slot, midi_note, 100);
+    if (midi_note >= 0 && midi_note < 128) {
+        g_pianoChPlaying[midi_note] = ch;
+        g_pianoLevel[midi_note] = 1.0f;
+    }
+    log_cmd("Piano ON: ch=%d midi=%d", ch, midi_note);
+}
+
+static void piano_key_up(int note, int octave) {
+    if (!g_connected) return;
+    int midi_note = (octave + 2) * 12 + note;
+    if (midi_note >= 0 && midi_note < 128) {
+        g_pianoChPlaying[midi_note] = -1;
+        g_pianoLevel[midi_note] = 0.0f;
+    }
+    ym7129_stop_note(g_slot, midi_note);
 }
 
 // ============================================================
@@ -156,13 +218,11 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 static HWND g_hWnd = NULL;
 
-// Forward declaration
-static void on_key_down(int vk);
-
 static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_KEYDOWN) {
         on_key_down((int)wParam);
-        // Still pass to ImGui for docking/navigation
+    } else if (msg == WM_KEYUP) {
+        on_key_up((int)wParam);
     }
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
         return true;
@@ -196,13 +256,37 @@ static void strike_drum(int idx) {
 
 static void on_key_down(int vk) {
     if (!g_connected) return;
+    if (g_keyStates[vk]) return; // ignore auto-repeat (same as DMPlayer)
+    g_keyStates[vk] = true;
+    // Drum pads (numpad)
     for (int i = 0; i < 12; i++) {
         if (vk == PAD_VK[i]) { strike_drum(i); return; }
     }
-    if (vk == VK_OEM_4) // [ bracket
-        g_volume = (g_volume > 0) ? g_volume - 1 : 0;
-    if (vk == VK_OEM_6) // ] bracket
-        g_volume = (g_volume < 15) ? g_volume + 1 : 15;
+    // Piano keys (main keyboard)
+    for (int i = 0; i < g_numPianoKeys; i++) {
+        if (vk == g_pianoKeyMappings[i].vk) {
+            int note = g_pianoKeyMappings[i].note;
+            int octave = g_currentOctave + g_pianoKeyMappings[i].octave_offset;
+            piano_key_down(note, octave);
+            return;
+        }
+    }
+    // Octave switch
+    if (vk == VK_PRIOR && g_currentOctave < 5) { g_currentOctave++; log_cmd("Octave: %d", g_currentOctave); }
+    if (vk == VK_NEXT && g_currentOctave > 0) { g_currentOctave--; log_cmd("Octave: %d", g_currentOctave); }
+}
+
+static void on_key_up(int vk) {
+    g_keyStates[vk] = false;
+    if (!g_connected) return;
+    for (int i = 0; i < g_numPianoKeys; i++) {
+        if (vk == g_pianoKeyMappings[i].vk) {
+            int note = g_pianoKeyMappings[i].note;
+            int octave = g_currentOctave + g_pianoKeyMappings[i].octave_offset;
+            piano_key_up(note, octave);
+            return;
+        }
+    }
 }
 
 static void do_connect() {
@@ -215,6 +299,10 @@ static void do_connect() {
     g_connected = true;
     ym7129_set_write_delay((uint32_t)g_delay_us);
     ym7129_init(g_slot);
+    // Load default FM patch on all 8 channels
+    for (int ch = 0; ch < 8; ch++)
+        ym7129_load_patch(g_slot, ch, &g_fmPatch);
+    spfm_flush();
     Sleep(100);
     log_cmd("Connected (delay=%dus)", g_delay_us);
 }
@@ -362,6 +450,260 @@ static void RenderLog() {
 }
 
 // ============================================================
+// Piano keyboard window (from smaf_window.cpp RenderPianoArea)
+// ============================================================
+static void RenderPiano() {
+    ImGui::SetNextWindowSize(ImVec2(500, 170), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Piano")) { ImGui::End(); return; }
+
+    ImGui::Text("Octave: %d  (PageUp/PageDown)", g_currentOctave);
+    ImGui::SameLine();
+    ImGui::TextDisabled("Keys: Z-M S-L Q-U I-P  2-3 5-7 9-0");
+
+    ImGui::Spacing();
+
+    ImGui::BeginChild("PianoScroll", ImVec2(0, 110), false, ImGuiWindowFlags_HorizontalScrollbar);
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImVec2 p = ImGui::GetCursorScreenPos();
+
+    const int kMinNote = 36; // C2
+    const int kMaxNote = 96; // B7
+
+    float whiteW = 20.0f, whiteH = 100.0f;
+    float blackW = 12.0f, blackH = 60.0f;
+
+    // Count white keys
+    int numWhiteKeys = 0;
+    for (int n = kMinNote; n <= kMaxNote; n++) {
+        if (!g_isBlackNote[n % 12]) numWhiteKeys++;
+    }
+
+    float pianoWidth = numWhiteKeys * whiteW;
+    float availWidth = ImGui::GetContentRegionAvail().x;
+    float centerOffset = (availWidth > pianoWidth) ? (availWidth - pianoWidth) * 0.5f : 0.0f;
+
+    // Base color
+    static const ImVec4 g_pianoColor = ImVec4(0.0f, 1.0f, 0.5f, 1.0f);
+
+    auto blendKey = [&](int midiNote, bool isBlack) -> ImU32 {
+        if (midiNote < 0 || midiNote >= 128 || g_pianoLevel[midiNote] <= 0.0f) {
+            return isBlack ? IM_COL32(0, 0, 0, 255) : IM_COL32(255, 255, 255, 255);
+        }
+        float lv = powf(g_pianoLevel[midiNote], 0.5f);
+        float baseMul = isBlack ? (0.1f + 0.7f * lv) : (0.15f + 0.85f * lv);
+        int r = (int)(g_pianoColor.x * 255 * baseMul);
+        int g = (int)(g_pianoColor.y * 255 * baseMul);
+        int b = (int)(g_pianoColor.z * 255 * baseMul);
+        return IM_COL32(r, g, b, 255);
+    };
+
+    // Pass 1: white keys
+    int wkIdx = 0;
+    for (int n = kMinNote; n <= kMaxNote; n++) {
+        if (g_isBlackNote[n % 12]) continue;
+        float x = p.x + centerOffset + wkIdx * whiteW;
+        ImU32 fillCol = blendKey(n, false);
+        draw_list->AddRectFilled(ImVec2(x, p.y), ImVec2(x + whiteW - 1, p.y + whiteH), fillCol);
+        draw_list->AddRect(ImVec2(x, p.y), ImVec2(x + whiteW, p.y + whiteH), IM_COL32(80, 80, 80, 255));
+        if (n % 12 == 0) {
+            char buf[8]; snprintf(buf, sizeof(buf), "C%d", (n / 12) - 1);
+            draw_list->AddText(ImVec2(x + 2, p.y + whiteH - 18), IM_COL32(0, 0, 0, 255), buf);
+        }
+        wkIdx++;
+    }
+
+    // Pass 2: black keys
+    wkIdx = 0;
+    for (int n = kMinNote; n <= kMaxNote; n++) {
+        if (!g_isBlackNote[n % 12]) { wkIdx++; continue; }
+        float x = p.x + centerOffset + (wkIdx - 1) * whiteW + whiteW - blackW * 0.5f;
+        ImU32 fillCol = blendKey(n, true);
+        draw_list->AddRectFilled(ImVec2(x, p.y), ImVec2(x + blackW, p.y + blackH), fillCol);
+        draw_list->AddRect(ImVec2(x, p.y), ImVec2(x + blackW, p.y + blackH), IM_COL32(0, 0, 0, 255));
+    }
+
+    ImGui::EndChild();
+
+    // FM voice parameter sliders (furnace-style table layout)
+    // Columns: Label | AR DR SL RR | TL ML  (MOD row, CAR row)
+    // Plus FB as separate small control
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    float sliderH = 80.0f;
+    ImVec2 sliderSize(20.0f, sliderH);
+
+    // Extract params into editable ints
+    int fb  = g_fmPatch.feedback_lr & 0x07;
+    int m_ar = (g_fmPatch.m_ardr >> 4) & 0x0F;
+    int m_dr = g_fmPatch.m_ardr & 0x0F;
+    int m_sl = (g_fmPatch.m_slrr >> 4) & 0x0F;
+    int m_rr = g_fmPatch.m_slrr & 0x0F;
+    int m_tl = g_fmPatch.m_tl & 0x7F;
+    int m_ml = g_fmPatch.m_mlws & 0x0F;
+    int c_ar = (g_fmPatch.c_ardr >> 4) & 0x0F;
+    int c_dr = g_fmPatch.c_ardr & 0x0F;
+    int c_sl = (g_fmPatch.c_slrr >> 4) & 0x0F;
+    int c_rr = g_fmPatch.c_slrr & 0x0F;
+    int c_tl = g_fmPatch.c_tl & 0x7F;
+    int c_ml = g_fmPatch.c_mlws & 0x0F;
+
+    bool changed = false;
+
+    // Helper: vertical slider with label above, value below (furnace style)
+    auto vslider = [&](const char* label, int* val, int vmin, int vmax) {
+        ImGui::TableNextColumn();
+        ImGui::Text("%s", label);
+        ImGui::TableNextColumn();
+        ImGui::PushID(label);
+        if (ImGui::VSliderInt("##v", sliderSize, val, vmin, vmax)) changed = true;
+        ImGui::PopID();
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", *val);
+    };
+
+    // Helper: draw ADSR envelope preview (from furnace drawFMEnv, simplified for YM7129)
+    auto drawADSR = [&](int ar, int dr, int sl, int rr, int tl_val, int maxTl, ImVec2 size, ImU32 color) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        ImRect rect(p, ImVec2(p.x + size.x, p.y + size.y));
+        dl->AddRectFilled(rect.Min, rect.Max, IM_COL32(30, 30, 40, 255));
+        dl->AddRect(rect.Min, rect.Max, IM_COL32(80, 80, 80, 255));
+        if (ar == 0) return;
+        // ADSR x positions (time)
+        float arF = (float)(15 - ar) / 15.0f;
+        float drF = arF + (sl / 15.0f) * ((float)(15 - dr) / 15.0f);
+        float rrF = (float)(15 - rr) / 15.0f;
+        arF /= 2.0f; drF /= 2.0f;
+        float tlN = (maxTl > 0) ? (float)(maxTl - tl_val) / maxTl : 1.0f;
+        float slN = tlN + (sl / 15.0f) * (1.0f - tlN);
+        // Points: bottom-left → AR peak → SL level → ground
+        ImVec2 p0(p.x, p.y + size.y);                                    // bottom-left
+        ImVec2 p1(p.x + arF * size.x, p.y + (1.0f - tlN) * size.y);    // AR peak
+        ImVec2 p2(p.x + drF * size.x, p.y + (1.0f - slN) * size.y);    // DR end (SL level)
+        ImVec2 p3(p.x + drF * size.x, p.y + size.y);                    // sustain level to bottom
+        ImVec2 p4(p.x + (drF + rrF) * size.x, p.y + size.y);             // RR end
+        // Sustain guide lines
+        dl->AddLine(ImVec2(p2.x, p2.y), ImVec2(p.x + size.x, p2.y), IM_COL32(80, 80, 80, 128));
+        dl->AddLine(p2, p3, IM_COL32(80, 80, 80, 128));
+        // Envelope: AR → DR → sustain ground
+        dl->AddLine(p0, p1, color);
+        dl->AddLine(p1, p2, color);
+        dl->AddLine(p2, p3, color);
+        // Release triangle (shaded)
+        ImVec2 pRS(p.x, p.y + (1.0f - tlN) * size.y);
+        dl->AddTriangleFilled(pRS, p4, p0, IM_COL32(40, 40, 50, 128));
+    };
+
+    // Helper: draw waveform preview (sine or half-sine based on WS bit)
+    auto drawWaveform = [&](bool ws, ImVec2 size, ImU32 color) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        ImRect rect(p, ImVec2(p.x + size.x, p.y + size.y));
+        dl->AddRectFilled(rect.Min, rect.Max, IM_COL32(30, 30, 40, 255));
+        dl->AddRect(rect.Min, rect.Max, IM_COL32(80, 80, 80, 255));
+        int steps = (int)size.x;
+        if (steps < 2) return;
+        float midY = p.y + size.y * 0.5f;
+        float amp = size.y * 0.4f;
+        for (int i = 0; i < steps; i++) {
+            float t = (float)i / steps * 2.0f * 3.14159265f;
+            float val = ws ? fabsf(sinf(t)) : sinf(t); // ws=0: sine, ws=1: half-sine
+            float y1 = midY - val * amp;
+            float y2 = midY - val * amp;
+            if (i < steps - 1) {
+                float t2 = (float)(i + 1) / steps * 2.0f * 3.14159265f;
+                float val2 = ws ? fabsf(sinf(t2)) : sinf(t2);
+                y2 = midY - val2 * amp;
+                dl->AddLine(ImVec2(p.x + i, y1), ImVec2(p.x + i + 1, y2), color);
+            }
+        }
+    };
+
+    // FB + L/R row
+    ImGui::Text("FB"); ImGui::SameLine();
+    if (ImGui::VSliderInt("##FB", ImVec2(20.0f, sliderH), &fb, 0, 7)) changed = true;
+    ImGui::SameLine(0, 8);
+    bool l_on = (g_fmPatch.feedback_lr >> 5) & 1;
+    bool r_on = (g_fmPatch.feedback_lr >> 6) & 1;
+    if (ImGui::Checkbox("L", &l_on)) changed = true;
+    ImGui::SameLine();
+    if (ImGui::Checkbox("R", &r_on)) changed = true;
+    ImGui::SameLine(0, 12);
+
+    // Waveform + ADSR previews
+    int m_ws = (g_fmPatch.m_mlws >> 5) & 1;
+    int c_ws = (g_fmPatch.c_mlws >> 5) & 1;
+    bool m_ws_b = m_ws != 0;
+    bool c_ws_b = c_ws != 0;
+    ImGui::BeginGroup();
+    ImGui::Text("MOD");
+    drawWaveform(m_ws != 0, ImVec2(60, sliderH), IM_COL32(100, 255, 100, 255));
+    ImGui::SameLine();
+    drawADSR(m_ar, m_dr, m_sl, m_rr, m_tl, 127, ImVec2(60, sliderH), IM_COL32(100, 255, 100, 255));
+    if (ImGui::Checkbox("WS", &m_ws_b)) { m_ws = m_ws_b ? 1 : 0; changed = true; }
+    ImGui::EndGroup();
+    ImGui::SameLine(0, 12);
+    ImGui::BeginGroup();
+    ImGui::Text("CAR");
+    drawWaveform(c_ws != 0, ImVec2(60, sliderH), IM_COL32(100, 150, 255, 255));
+    ImGui::SameLine();
+    drawADSR(c_ar, c_dr, c_sl, c_rr, c_tl, 127, ImVec2(60, sliderH), IM_COL32(100, 150, 255, 255));
+    if (ImGui::Checkbox("WS", &c_ws_b)) { c_ws = c_ws_b ? 1 : 0; changed = true; }
+    ImGui::EndGroup();
+    ImGui::SameLine(0, 12);
+
+    // FM Operators table: 2 rows (MOD, CAR) x columns (AR DR SL RR | TL ML)
+    // Columns: label, slider, val  x 6 params = 18 columns
+    if (ImGui::BeginTable("FMParams", 18, ImGuiTableFlags_SizingFixedFit)) {
+        for (int c = 0; c < 6; c++)
+            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 22.0f + 4.0f);
+        ImGui::TableHeadersRow();
+
+        // Row 0: MOD
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "MOD");
+        vslider("AR", &m_ar, 0, 15);
+        vslider("DR", &m_dr, 0, 15);
+        vslider("SL", &m_sl, 0, 15);
+        vslider("RR", &m_rr, 0, 15);
+        vslider("TL", &m_tl, 0, 127);
+        vslider("ML", &m_ml, 0, 15);
+
+        // Row 1: CAR
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "CAR");
+        vslider("AR", &c_ar, 0, 15);
+        vslider("DR", &c_dr, 0, 15);
+        vslider("SL", &c_sl, 0, 15);
+        vslider("RR", &c_rr, 0, 15);
+        vslider("TL", &c_tl, 0, 127);
+        vslider("ML", &c_ml, 0, 15);
+
+        ImGui::EndTable();
+    }
+
+    if (changed) {
+        g_fmPatch.feedback_lr = (fb & 0x07) | (l_on ? (1<<5) : 0) | (r_on ? (1<<6) : 0);
+        g_fmPatch.m_ardr = ((m_ar & 0x0F) << 4) | (m_dr & 0x0F);
+        g_fmPatch.m_slrr = ((m_sl & 0x0F) << 4) | (m_rr & 0x0F);
+        g_fmPatch.m_tl   = m_tl & 0x7F;
+        g_fmPatch.m_mlws = (m_ml & 0x0F) | ((m_ws & 1) << 5);
+        g_fmPatch.c_ardr = ((c_ar & 0x0F) << 4) | (c_dr & 0x0F);
+        g_fmPatch.c_slrr = ((c_sl & 0x0F) << 4) | (c_rr & 0x0F);
+        g_fmPatch.c_tl   = c_tl & 0x7F;
+        g_fmPatch.c_mlws = (c_ml & 0x0F) | ((c_ws & 1) << 5);
+        reload_fm_patch();
+    }
+
+    ImGui::End();
+}
+
+// ============================================================
 // WinMain
 // ============================================================
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
@@ -412,8 +754,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         snprintf(inipath, sizeof(inipath), "%S", wbuf);
         io.IniFilename = strdup(inipath);
     }
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable
-                    | ImGuiConfigFlags_ViewportsEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    // ViewportsEnable 暂时关闭 — 窗口不能拖出成为独立窗口
+    // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.ConfigViewportsNoDecoration = false;
     io.FontGlobalScale = 1.0f;
     io.FontAllowUserScaling = false;
@@ -473,12 +816,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             CreateRenderTarget();
         }
 
-        // Decay hit animations
+        // Decay hit animations + piano key levels
         float dt = io.DeltaTime;
         for (int i = 0; i < 12; i++) {
             if (g_hitAnim[i] > 0.0f) {
                 g_hitAnim[i] -= dt * 6.0f;
                 if (g_hitAnim[i] < 0.0f) g_hitAnim[i] = 0.0f;
+            }
+        }
+        for (int i = 0; i < 128; i++) {
+            if (g_pianoLevel[i] > 0.0f) {
+                g_pianoLevel[i] -= dt * 4.0f;
+                if (g_pianoLevel[i] < 0.0f) g_pianoLevel[i] = 0.0f;
+                if (g_pianoLevel[i] <= 0.0f && g_pianoChPlaying[i] >= 0) {
+                    g_pianoChPlaying[i] = -1;
+                }
             }
         }
 
@@ -523,6 +875,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         // Render child windows
         RenderDrumPad();
         RenderLog();
+        RenderPiano();
 
         ImGui::End(); // ##DockSpaceHost
 
