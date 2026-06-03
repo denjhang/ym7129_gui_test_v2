@@ -1,0 +1,4 @@
+*.o
+*.exe
+*.dll
+libftd2xx.a
