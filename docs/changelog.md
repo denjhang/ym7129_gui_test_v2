@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-06-04 — 鼓声触发修复 + 键盘输入修复
+
+### 修复
+- 修复鼓声触发错误（点击一个鼓出现别的声音）:
+  - DRUM_PADS 全部改用 channel=0，不再分散到 4 个 slot
+  - 每次 strike 前调用 ym7129_init 重新初始化芯片（与 ym7129_drum_all.c 一致）
+  - $84 trigger 前先 mute（$84=0x00），防止累积 state 污染
+  - 时序对齐数据流实测值 ~1700us（原 1500us+3000us 不准确）
+- 修复鼓声 panning 偏右: 每次触发前 init 芯片确保寄存器状态正确
+- 修复数字键无效: 去掉 NavEnableKeyboard（避免 ImGui 消费按键事件）
+- 键盘输入改用 Win32 WM_KEYDOWN + VK 键码（与 DMPlayer 一致），不再依赖 ImGui::IsKeyPressed
+
+### 待修复
+- 小键盘按键（Num*, Num-, Num/, Num+）仍无反应
+
 ## 2026-06-03 — 初始版本
 
 ### 新增

@@ -39,9 +39,9 @@ typedef struct {
 
 static const drum_pad_t DRUM_PADS[12] = {
     { "BD  H",  0, 0, 0 }, { "BD  L",  0, 1, 0 },
-    { "SD  H",  1, 0, 1 }, { "SD  L",  1, 1, 1 },
-    { "C.HH H", 2, 0, 2 }, { "C.HH L", 2, 1, 2 },
-    { "O.HH H", 3, 0, 3 }, { "O.HH L", 3, 1, 3 },
+    { "SD  H",  1, 0, 0 }, { "SD  L",  1, 1, 0 },
+    { "C.HH H", 2, 0, 0 }, { "C.HH L", 2, 1, 0 },
+    { "O.HH H", 3, 0, 0 }, { "O.HH L", 3, 1, 0 },
     { "Tom H",  4, 0, 0 }, { "Tom L",  4, 1, 0 },
     { "Ride H", 5, 0, 1 }, { "Ride L", 5, 1, 1 },
 };
@@ -50,14 +50,17 @@ static const char *PAD_KEYNAMES[12] = {
     "0","1","2","3","4","5","7","8","Num*","Num-","Num/","Num+"
 };
 
-static const ImGuiKey PAD_KEYS[12] = {
-    ImGuiKey_0, ImGuiKey_1,
-    ImGuiKey_2, ImGuiKey_3,
-    ImGuiKey_4, ImGuiKey_5,
-    ImGuiKey_7, ImGuiKey_8,
-    ImGuiKey_KeypadMultiply, ImGuiKey_KeypadSubtract,
-    ImGuiKey_KeypadDivide, ImGuiKey_KeypadAdd,
+// Win32 VK key codes for drum pads
+static const int PAD_VK[12] = {
+    '0', '1',
+    '2', '3',
+    '4', '5',
+    '7', '8',
+    VK_MULTIPLY, VK_SUBTRACT,
+    VK_DIVIDE, VK_ADD,
 };
+
+static void on_key_down(int vk); // forward declaration, defined after strike_drum
 
 // ============================================================
 // State
@@ -128,7 +131,14 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 static HWND g_hWnd = NULL;
 
+// Forward declaration
+static void on_key_down(int vk);
+
 static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_KEYDOWN) {
+        on_key_down((int)wParam);
+        // Still pass to ImGui for docking/navigation
+    }
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
         return true;
     switch (msg) {
@@ -151,8 +161,22 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 static void strike_drum(int idx) {
     if (!g_connected || idx < 0 || idx >= 12) return;
     const drum_pad_t *p = &DRUM_PADS[idx];
+    // Re-init chip before each strike (same as ym7129_drum_all.c)
+    ym7129_init(g_slot);
+    spfm_flush();
     ym7129_drum_strike(g_slot, p->channel, p->rhy_type, p->lh, (uint8_t)g_volume);
     g_hitAnim[idx] = 1.0f;
+}
+
+static void on_key_down(int vk) {
+    if (!g_connected) return;
+    for (int i = 0; i < 12; i++) {
+        if (vk == PAD_VK[i]) { strike_drum(i); return; }
+    }
+    if (vk == VK_OEM_4) // [ bracket
+        g_volume = (g_volume > 0) ? g_volume - 1 : 0;
+    if (vk == VK_OEM_6) // ] bracket
+        g_volume = (g_volume < 15) ? g_volume + 1 : 15;
 }
 
 static void do_connect() {
@@ -302,8 +326,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.IniFilename = NULL;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard
-                    | ImGuiConfigFlags_DockingEnable
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable
                     | ImGuiConfigFlags_ViewportsEnable;
     io.ConfigViewportsNoDecoration = false;
     io.FontGlobalScale = 1.0f;
@@ -372,16 +395,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                 if (g_hitAnim[i] < 0.0f) g_hitAnim[i] = 0.0f;
             }
         }
-
-        // Keyboard input
-        for (int i = 0; i < 12; i++) {
-            if (ImGui::IsKeyPressed(PAD_KEYS[i], false))
-                strike_drum(i);
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false))
-            g_volume = (g_volume > 0) ? g_volume - 1 : 0;
-        if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, false))
-            g_volume = (g_volume < 15) ? g_volume + 1 : 15;
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();

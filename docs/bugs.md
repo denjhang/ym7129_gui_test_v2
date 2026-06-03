@@ -31,3 +31,48 @@
 - 清理所有 .o 文件后全量重编译
 
 **教训**: 从参考项目复制 imgui 源码时，必须同步更新 include 路径和配置标志，且必须清理旧的目标文件缓存。不要混用不同版本的 imgui 头文件和源码。
+
+## 2. 鼓声触发错误（点击一个鼓出现别的声音）
+
+**日期**: 2026-06-04
+**文件**: `drum_gui.cpp`, `ym7129.c`
+**现象**: 点击鼓垫触发错误的鼓声，且鼓声 panning 偏右
+
+**根本原因**:
+
+1. **DRUM_PADS channel 分配错误**: 12 种鼓分配到 4 个 $80-$83 slot，Tom(channel=0) 和 BD(channel=0) 共用 slot0，Ride(channel=1) 和 SD(channel=1) 共用 slot1。不同鼓的参数互相覆盖，`drum_trigger_state` 累积导致触发错误的鼓声。
+
+2. **缺少 chip 重新初始化**: `ym7129_drum_all.c`（已验证正常）每次 strike 前都调用 `ym7129_init` 重新初始化芯片。GUI 程序只在 connect 时 init 一次，导致 FM 通道 L/R 寄存器状态不对，鼓声 panning 偏右。
+
+3. **$84 trigger state 累积**: 原代码只 clear/set 当前 bit，其他 bit 保持。数据流分析表明触发前应先 mute（$84=0x00）。
+
+4. **时序不准确**: 原代码 sleep 1500us + 3000us，数据流实测每步 ~1730us。
+
+**修复方法**:
+- DRUM_PADS 全部 channel=0，只使用 slot0（与 ym7129_drum_all.c 一致）
+- 每次 strike 前调用 `ym7129_init` 重新初始化芯片
+- `ym7129_drum_strike` 先写 $84=0x00 mute，再写参数，再 clear→set 上升沿
+- 时序改为 ~1700us（对齐数据流）
+
+**教训**: 应该首先参照已验证的程序（ym7129_drum_all.c）的行为，而不是自己猜测时序和寄存器操作顺序。
+
+## 3. 数字键无效
+
+**日期**: 2026-06-04
+**文件**: `drum_gui.cpp`
+**现象**: 按数字键 0-5, 7, 8 无鼓声响应
+
+**根本原因**: `ImGuiConfigFlags_NavEnableKeyboard` 让 ImGui 内部消费数字键用于窗口导航，`ImGui::IsKeyPressed` 返回 false。
+
+**修复方法**:
+- 去掉 `ImGuiConfigFlags_NavEnableKeyboard`
+- 键盘输入从 `ImGui::IsKeyPressed` 改为 Win32 `WM_KEYDOWN` + VK 键码（与 DMPlayer 一致）
+- `WM_KEYDOWN` 处理放在 `ImGui_ImplWin32_WndProcHandler` 之前
+
+## 4. 小键盘按键无反应（待修复）
+
+**日期**: 2026-06-04
+**文件**: `drum_gui.cpp`
+**现象**: Num*, Num-, Num/, Num+ 按键无反应
+
+**状态**: 可能是 NumLock 状态影响 VK_MULTIPLY/VK_SUBTRACT 等映射，待进一步调试。
