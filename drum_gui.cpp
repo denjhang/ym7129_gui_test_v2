@@ -736,7 +736,8 @@ static void RenderPiano() {
     ImGui::SameLine();
     if (ImGui::Checkbox("R", &r_on)) changed_fm = true;
     ImGui::SameLine();
-    if (ImGui::Checkbox("Bit7", &bit7_on)) { fb_bit7 = bit7_on ? 1 : 0; changed_fm = true; }
+    if (ImGui::Checkbox("PM/FM", &bit7_on)) { fb_bit7 = bit7_on ? 1 : 0; changed_fm = true; }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("bit7=0: FM synthesis (true FM)\nbit7=1: PM synthesis (YM2413-like)");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(100);
     if (ImGui::SliderInt("Vol", &g_velocity, 0, 127)) {}
@@ -753,8 +754,9 @@ static void RenderPiano() {
     // Columns: OP | AR | DR | SL | RR | sep | TL | ML | EG | VIB/WS | DM/AM | DP | sep | Wave | Env
     int numCols = 16;
     int numOps = 2;
-    float sliderH = 80.0f;
-    ImVec2 sliderSz(20.0f, sliderH);
+    float sliderH = 65.0f;
+    float sliderW = 35.0f;  // wider to fit 3-digit numbers (TL: 0-255)
+    ImVec2 sliderSz(sliderW, sliderH);
 
     // Helper: center slider in column (furnace CENTER_VSLIDER)
     auto centerVSlider = [&]() {
