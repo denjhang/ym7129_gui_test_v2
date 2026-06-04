@@ -114,7 +114,6 @@ void ym7129_init(uint8_t slot) {
         ym7129_write_reg(slot, 0x70 + ch,      0x60); // L+R, FB=0
     }
 }
-}
 
 // ============================================================
 // Load patch onto one logical channel

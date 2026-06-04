@@ -506,6 +506,54 @@ static void RenderDrumPad() {
 
     ImGui::Spacing();
     ImGui::TextDisabled("[ ] = Volume   Keys: Num0-5,7,8,Num*,Num-,Num/,Num+");
+
+    // Drum pan debug: $78-$7F (wuqi marked unused, may control drum L/R/pan)
+    // Also show $70-$77 FM L/R/FB for comparison
+    static bool drum_pan_debug = false;
+    static uint8_t drum_pan[16] = {};
+    static bool drum_pan_inited = false;
+    if (!drum_pan_inited) {
+        for (int i = 0; i < 8; i++) drum_pan[i] = 0x60; // $70-$77
+        drum_pan_inited = true;
+    }
+    ImGui::Spacing();
+    ImGui::Checkbox("Pan Debug ($70-$7F)", &drum_pan_debug);
+    if (drum_pan_debug) {
+        if (ImGui::BeginTable("PanDebug", 4, ImGuiTableFlags_SizingStretchSame)) {
+            ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+            ImGui::TableNextColumn(); ImGui::Text("Reg");
+            ImGui::TableNextColumn(); ImGui::Text("Guess");
+            ImGui::TableNextColumn(); ImGui::Text("Value");
+            ImGui::TableNextColumn(); ImGui::Text("Bits");
+            for (int i = 0; i < 16; i++) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn(); ImGui::Text("$%02X", 0x70 + i);
+                ImGui::TableNextColumn(); ImGui::Text(i < 8 ? "FM L/R/FB" : "Drum Pan?");
+                ImGui::TableNextColumn();
+                ImGui::PushID(i);
+                ImGui::SetNextItemWidth(50);
+                int pv = drum_pan[i];
+                if (ImGui::InputInt("##pan", &pv, 0)) drum_pan[i] = (uint8_t)(pv & 0xFF);
+                ImGui::PopID();
+                ImGui::TableNextColumn();
+                if (i < 8) ImGui::TextDisabled("R L ?? FB");
+                else ImGui::TextDisabled("unknown");
+            }
+            ImGui::EndTable();
+        }
+        ImGui::Spacing();
+        if (ImGui::Button("Apply All")) {
+            for (int i = 0; i < 16; i++)
+                ym7129_write_reg(g_slot, 0x70 + i, drum_pan[i]);
+            log_cmd("Pan: $70-$7F applied");
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Reset")) {
+            for (int i = 0; i < 8; i++) drum_pan[i] = 0x60;
+            for (int i = 8; i < 16; i++) drum_pan[i] = 0x00;
+        }
+    }
+
     ImGui::End();
 }
 
