@@ -72,7 +72,6 @@ static bool    g_connected = false;
 static uint8_t g_slot = 0;
 static int     g_volume = 0;
 static bool    g_keyStates[256] = {};
-static int     g_delay_us = 80;
 static float   g_hitAnim[12] = {};
 
 // ============================================================
@@ -367,16 +366,9 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 static void strike_drum(int idx) {
     if (!g_connected || idx < 0 || idx >= 12) return;
     const drum_pad_t *p = &DRUM_PADS[idx];
-    // Ensure all FM L/R channels are enabled for drum output
-    // YM7129 drum output may route through FM channel L/R ($70-$77)
-    for (int ch = 0; ch < 8; ch++)
-        ym7129_write_reg(g_slot, 0x70 + ch, 0x60); // L+R, FB=0
     ym7129_drum_mute(g_slot);
     log_cmd("Strike: %s (Rhy=%d L/H=%d Vol=%d)", p->name, p->rhy_type, p->lh, g_volume);
     ym7129_drum_strike(g_slot, p->channel, p->rhy_type, p->lh, (uint8_t)g_volume);
-    // Restore FM patch L/R/FB settings
-    for (int ch = 0; ch < 8; ch++)
-        ym7129_write_reg(g_slot, 0x70 + ch, g_fmPatch.feedback_lr);
     g_hitAnim[idx] = 1.0f;
 }
 
@@ -423,14 +415,12 @@ static void do_connect() {
         return;
     }
     g_connected = true;
-    ym7129_set_write_delay((uint32_t)g_delay_us);
     ym7129_init(g_slot);
     // Load default FM patch on all 8 channels
     for (int ch = 0; ch < 8; ch++)
         ym7129_load_patch(g_slot, ch, &g_fmPatch);
-    spfm_flush();
     Sleep(100);
-    log_cmd("Connected (delay=%dus)", g_delay_us);
+    log_cmd("Connected");
 }
 
 static void do_disconnect() {
@@ -465,8 +455,8 @@ static void RenderDrumPad() {
     else
         ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.3f, 1.0f), "Disconnected");
 
-    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 140);
-    ImGui::Text("Vol: %d   Delay: %dus", g_volume, g_delay_us);
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 60);
+    ImGui::Text("Vol: %d", g_volume);
     ImGui::Spacing();
 
     // Connect / Disconnect / Reset
@@ -482,15 +472,6 @@ static void RenderDrumPad() {
     ImGui::BeginDisabled(!g_connected);
     if (ImGui::Button("Reset", ImVec2(btnW, 0))) do_reset();
     ImGui::EndDisabled();
-
-    ImGui::Spacing();
-
-    // Delay slider
-    ImGui::Text("Write Delay (us):");
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::SliderInt("##delay", &g_delay_us, 0, 200)) {
-        if (g_connected) ym7129_set_write_delay((uint32_t)g_delay_us);
-    }
 
     ImGui::Spacing();
 

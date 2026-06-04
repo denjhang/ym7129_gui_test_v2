@@ -48,18 +48,8 @@ static ym7129_ch_t ch_state[2][YM7129_NUM_CH];
 static uint8_t drum_trigger_state[2] = {0, 0};
 
 // ============================================================
-// Configurable write delay (default 80us)
-// ============================================================
-static uint32_t s_write_delay_us = 80;
-
-void ym7129_set_write_delay(uint32_t us) {
-    s_write_delay_us = us;
-}
-
-// ============================================================
-// Low-level register write
-// YM7129 uses parallel bus interface via SPFM:
-//   port=0, addr=register address, data=value
+// Low-level register write (hardcoded timing: flush + 90us)
+// YM7129 requires 89.2us between consecutive writes (wuqi verified)
 // ============================================================
 void ym7129_write_reg(uint8_t slot, uint8_t addr, uint8_t data) {
     uint8_t cmd[6];
@@ -67,7 +57,7 @@ void ym7129_write_reg(uint8_t slot, uint8_t addr, uint8_t data) {
     cmd[3] = slot; cmd[4] = 0x81; cmd[5] = data;  // A0=1, write data
     spfm_write_raw(cmd, 6);
     spfm_flush();
-    if (s_write_delay_us > 0) spfm_sleep_us(s_write_delay_us);
+    spfm_sleep_us(90);
 }
 
 // ============================================================
@@ -278,29 +268,24 @@ void ym7129_drum_strike(uint8_t slot, uint8_t channel, uint8_t rhy_type, uint8_t
     // Mute all drums first (reset $84 to 0)
     drum_trigger_state[slot] = 0;
     ym7129_write_reg(slot, 0x84, 0x00);
-    spfm_flush();
     spfm_sleep_us(1700);
 
     // Write rhythm type/volume to $80+channel
     uint8_t type_val = (lh << 7) | ((rhy_type & 7) << 4) | (volume & 0x0F);
     ym7129_write_reg(slot, 0x80 + channel, type_val);
-    spfm_flush();
     spfm_sleep_us(1700);
 
     // Clear target bit, then set (rising edge trigger)
     uint8_t bit_mask = (1 << channel);
     drum_trigger_state[slot] &= ~bit_mask;
     ym7129_write_reg(slot, 0x84, drum_trigger_state[slot]);
-    spfm_flush();
     spfm_sleep_us(1700);
 
     drum_trigger_state[slot] |= bit_mask;
     ym7129_write_reg(slot, 0x84, drum_trigger_state[slot]);
-    spfm_flush();
 }
 
 void ym7129_drum_mute(uint8_t slot) {
     drum_trigger_state[slot] = 0;
     ym7129_write_reg(slot, 0x84, 0x00);
-    spfm_flush();
 }
