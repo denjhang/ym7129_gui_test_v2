@@ -50,7 +50,9 @@ YM7129 音色编辑器 + 鼓垫 + FM 钢琴键盘，基于 ImGui + DirectX11，�
 | 4 | Acid-Bass | 酸性贝斯 |
 | 5 | Distortion-EG | 失真包络 |
 | 6 | E-Piano | 电钢琴 |
-| 7-9 | User4-6 | 用户自定义（空白） |
+| 7 | Accordion | 手风琴 |
+| 8 | Guitar | 吉他 |
+| 9 | Organ | 风琴 |
 
 ## 协议
 

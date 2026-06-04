@@ -1,6 +1,6 @@
 # YM7129 预设音色列表
 
-预设数据存储在 `ym7129_config.ini` 的 `[Preset0]`~`[reset9]` 中。
+预设数据存储在 `ym7129_config.ini` 的 `[Preset0]`~`[Preset9]` 中。
 
 寄存器说明：
 - `feedback_lr`: bit7=FM/PM, bit6=R, bit5=L, bit2-0=FB(0-7)
@@ -26,9 +26,9 @@
 | 4 | Acid-Bass | 0 | ✓ | ✓ | PM | 15 | 7 | 3 | 4 | 26 | 0 | 0 | 0 | 0 | 15 | 0 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 1 |
 | 5 | Distortion-EG | 0 | ✓ | ✓ | PM | 11 | 8 | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 9 | 0 | 0 | 4 | 0 | 4 | 0 | 0 | 0 | 1 |
 | 6 | E-Piano | 7 | ✓ | ✓ | PM | 11 | 3 | 5 | 4 | 172 | 15 | 0 | 1 | 1 | 9 | 2 | 9 | 4 | 0 | 1 | 0 | 0 | 0 | 0 |
-| 7 | User4 | - | - | - | FM | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| 8 | User5 | - | - | - | FM | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| 9 | User6 | - | - | - | FM | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 7 | Accordion | 0 | ✓ | ✓ | PM | 6 | 4 | 0 | 0 | 78 | 1 | 1 | 0 | 0 | 4 | 0 | 0 | 4 | 0 | 2 | 1 | 0 | 0 | 1 |
+| 8 | Guitar | 0 | ✓ | ✓ | PM | 15 | 4 | 8 | 2 | 125 | 3 | 1 | 1 | 0 | 15 | 3 | 8 | 4 | 0 | 1 | 1 | 0 | 0 | 0 |
+| 9 | Organ | 0 | ✓ | ✓ | PM | 6 | 0 | 4 | 3 | 135 | 3 | 1 | 1 | 0 | 7 | 0 | 7 | 6 | 0 | 1 | 1 | 0 | 0 | 1 |
 
 ---
 
@@ -74,4 +74,22 @@ c_mlws=4         c_tl=128    c_ardr=144 c_slrr=100
 ```
 feedback_lr=231  m_mlws=47   m_tl=172  m_ardr=179  m_slrr=84
 c_mlws=1         c_tl=0      c_ardr=146 c_slrr=148
+```
+
+### Accordion
+```
+feedback_lr=224  m_mlws=33   m_tl=78   m_ardr=100  m_slrr=0
+c_mlws=34        c_tl=128    c_ardr=64  c_slrr=116
+```
+
+### Guitar
+```
+feedback_lr=224  m_mlws=35   m_tl=125  m_ardr=244  m_slrr=130
+c_mlws=33        c_tl=0      c_ardr=243 c_slrr=132
+```
+
+### Organ
+```
+feedback_lr=224  m_mlws=35   m_tl=135  m_ardr=96   m_slrr=67
+c_mlws=33        c_tl=128    c_ardr=112 c_slrr=118
 ```
