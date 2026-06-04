@@ -117,8 +117,11 @@ void ym7129_load_patch(uint8_t slot, uint8_t ch, const ym7129_patch_t *p);
 // Trigger a note-on  (midi_note 0-127, velocity 0-127)
 void ym7129_note_on(uint8_t slot, uint8_t ch, uint8_t midi_note, uint8_t velocity);
 
-// Trigger a note-off
+// Trigger a note-off (release envelope)
 void ym7129_note_off(uint8_t slot, uint8_t ch);
+
+// Immediately kill a note (Kon=0 + max TL, no release)
+void ym7129_note_kill(uint8_t slot, uint8_t ch);
 
 // Higher-level: find a free channel and play note (returns ch used, -1 if none)
 int  ym7129_play_note(uint8_t slot, uint8_t midi_note, uint8_t velocity);

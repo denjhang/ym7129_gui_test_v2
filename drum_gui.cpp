@@ -115,8 +115,9 @@ static const int g_numPianoKeys = sizeof(g_pianoKeyMappings) / sizeof(KeyMapping
 static const bool g_isBlackNote[12] = {false, true, false, true, false, false, true, false, true, false, true, false};
 
 static int   g_currentOctave = 2; // Z=C4 (same as DMPlayer)
-static int   g_pianoChPlaying[128] = {};  // indexed by MIDI note, -1=none
-static float g_pianoLevel[128] = {};
+static int   g_pianoNotePlaying = -1;  // current MIDI note, -1=none
+static int   g_pianoChannel = 0;       // always use channel 0 (single channel)
+static float g_pianoLevel = 0.0f;
 
 // Editable FM patch (start with simple sine-like tone)
 static ym7129_patch_t g_fmPatch = {
@@ -255,21 +256,27 @@ static void load_user_preset_config() {
 static void piano_key_down(int note, int octave) {
     if (!g_connected) return;
     int midi_note = (octave + 2) * 12 + note;
-    int ch = ym7129_play_note(g_slot, midi_note, 100);
-    if (midi_note >= 0 && midi_note < 128) {
-        g_pianoChPlaying[midi_note] = ch;
-        g_pianoLevel[midi_note] = 1.0f; // will be held at 1.0 while key is pressed
+
+    // Single channel: kill previous note first if any
+    if (g_pianoNotePlaying >= 0) {
+        ym7129_note_kill(g_slot, (uint8_t)g_pianoChannel);
     }
-    log_cmd("Piano ON: ch=%d midi=%d", ch, midi_note);
+
+    ym7129_note_on(g_slot, (uint8_t)g_pianoChannel, (uint8_t)midi_note, 100);
+    g_pianoNotePlaying = midi_note;
+    g_pianoLevel = 1.0f;
+    log_cmd("Piano ON: midi=%d", midi_note);
 }
 
 static void piano_key_up(int note, int octave) {
     if (!g_connected) return;
     int midi_note = (octave + 2) * 12 + note;
-    if (midi_note >= 0 && midi_note < 128) {
-        g_pianoChPlaying[midi_note] = -1; // mark released — decay will fade out
+    if (g_pianoNotePlaying == midi_note) {
+        // Release envelope (RR-based decay)
+        ym7129_note_off(g_slot, (uint8_t)g_pianoChannel);
+        g_pianoNotePlaying = -1;
+        log_cmd("Piano OFF: midi=%d", midi_note);
     }
-    ym7129_stop_note(g_slot, midi_note);
 }
 
 // ============================================================
@@ -601,10 +608,10 @@ static void RenderPiano() {
     static const ImVec4 g_pianoColor = ImVec4(0.0f, 1.0f, 0.5f, 1.0f);
 
     auto blendKey = [&](int midiNote, bool isBlack) -> ImU32 {
-        if (midiNote < 0 || midiNote >= 128 || g_pianoLevel[midiNote] <= 0.0f) {
+        if (midiNote < 0 || midiNote >= 128 || midiNote != g_pianoNotePlaying || g_pianoLevel <= 0.0f) {
             return isBlack ? IM_COL32(0, 0, 0, 255) : IM_COL32(255, 255, 255, 255);
         }
-        float lv = powf(g_pianoLevel[midiNote], 0.5f);
+        float lv = powf(g_pianoLevel, 0.5f);
         float baseMul = isBlack ? (0.1f + 0.7f * lv) : (0.15f + 0.85f * lv);
         int r = (int)(g_pianoColor.x * 255 * baseMul);
         int g = (int)(g_pianoColor.y * 255 * baseMul);
@@ -1107,15 +1114,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                 if (g_hitAnim[i] < 0.0f) g_hitAnim[i] = 0.0f;
             }
         }
-        for (int i = 0; i < 128; i++) {
-            if (g_pianoLevel[i] > 0.0f) {
-                // Only decay after key release (g_pianoChPlaying < 0)
-                // While key is held, level stays at 1.0
-                if (g_pianoChPlaying[i] < 0) {
-                    g_pianoLevel[i] -= dt * 3.0f;
-                    if (g_pianoLevel[i] < 0.0f) g_pianoLevel[i] = 0.0f;
-                }
-            }
+        // Decay piano visual level after key release
+        if (g_pianoLevel > 0.0f && g_pianoNotePlaying < 0) {
+            g_pianoLevel -= dt * 3.0f;
+            if (g_pianoLevel < 0.0f) g_pianoLevel = 0.0f;
         }
 
         ImGui_ImplDX11_NewFrame();

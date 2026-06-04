@@ -228,6 +228,22 @@ void ym7129_note_off(uint8_t slot, uint8_t ch) {
 }
 
 // ============================================================
+// Note Kill (immediate silence, no release envelope)
+// ============================================================
+void ym7129_note_kill(uint8_t slot, uint8_t ch) {
+    if (ch >= YM7129_NUM_CH) return;
+    uint8_t off = ym7129_ch_offset[ch];
+
+    ch_state[slot][ch].active = false;
+
+    // Immediate kill: KON=0, TL=max (silent)
+    ym7129_write_reg(slot, YM7129_REG_BASE_MLWS + off + 2,
+                     ch_state[slot][ch].c_mlws & 0x7F); // KON=0
+    ym7129_write_reg(slot, YM7129_REG_BASE_TL + off + 2, 0x7F); // carrier TL=max
+    spfm_flush();
+}
+
+// ============================================================
 // Higher-level: find free channel and play
 // ============================================================
 int ym7129_play_note(uint8_t slot, uint8_t midi_note, uint8_t velocity) {
