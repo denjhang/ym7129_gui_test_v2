@@ -157,6 +157,8 @@ static PresetSlot g_presets[NUM_PRESETS] = {
 };
 // Track which preset name is being edited (double-click)
 static int g_editingPresetName = -1;
+// Track which preset slot is currently active (for auto-save on mouse release)
+static int g_currentPresetSlot = 0;
 
 static void reload_fm_patch() {
     if (!g_connected) return;
@@ -941,8 +943,9 @@ static void RenderPiano() {
         g_fmPatch.c_tl   = (c_tl & 0x7F) | ((c_dp & 1) << 7);                              // bit7=DP, bit6-0=vol
         g_fmPatch.c_mlws = (c_ml & 0x0F) | ((c_eg & 1) << 4) | ((c_ws & 1) << 5) | ((c_am & 1) << 6);   // bit4=EG, bit5=WS, bit6=AM
         reload_fm_patch();
-        // Only save when mouse is released (not during drag)
+        // On mouse release, save to current preset slot
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+            g_presets[g_currentPresetSlot].patch = g_fmPatch;
             save_all_presets();
         }
     }
@@ -980,6 +983,7 @@ static void RenderPiano() {
             float btnWidth = textSize.x + ImGui::GetStyle().FramePadding.x * 2.0f + 4.0f;
             if (ImGui::Button(g_presets[i].name, ImVec2(btnWidth, 0))) {
                 g_fmPatch = g_presets[i].patch;
+                g_currentPresetSlot = i;  // Set as active preset slot
                 reload_fm_patch();
                 log_cmd("Preset: %s", g_presets[i].name);
             }
