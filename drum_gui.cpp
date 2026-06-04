@@ -941,11 +941,14 @@ static void RenderPiano() {
         g_fmPatch.c_tl   = (c_tl & 0x7F) | ((c_dp & 1) << 7);                              // bit7=DP, bit6-0=vol
         g_fmPatch.c_mlws = (c_ml & 0x0F) | ((c_eg & 1) << 4) | ((c_ws & 1) << 5) | ((c_am & 1) << 6);   // bit4=EG, bit5=WS, bit6=AM
         reload_fm_patch();
-        save_all_presets();
+        // Only save when mouse is released (not during drag)
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+            save_all_presets();
+        }
     }
 
     // ============================================================
-    // Preset buttons (wuqi hardware captured patches)
+    // Preset buttons (10 slots, double-click to rename)
     // ============================================================
     ImGui::Spacing();
     ImGui::Separator();
@@ -957,18 +960,11 @@ static void RenderPiano() {
         ImGui::PushID(i);
         if (i > 0) ImGui::SameLine();
 
-        // Calculate button width based on text
-        ImVec2 textSize = ImGui::CalcTextSize(g_presets[i].name);
-        float btnWidth = textSize.x + ImGui::GetStyle().FramePadding.x * 2.0f + 4.0f;
-
-        // Check for double-click to edit name
-        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
-            g_editingPresetName = i;
-        }
-
         // If editing this preset's name, show input field
         if (g_editingPresetName == i) {
-            ImGui::SetNextItemWidth(btnWidth + 20);
+            ImVec2 textSize = ImGui::CalcTextSize(g_presets[i].name);
+            float btnWidth = textSize.x + ImGui::GetStyle().FramePadding.x * 2.0f + 20.0f;
+            ImGui::SetNextItemWidth(btnWidth);
             if (ImGui::InputText("##edit", g_presets[i].name, sizeof(g_presets[i].name), ImGuiInputTextFlags_EnterReturnsTrue)) {
                 g_editingPresetName = -1;
                 save_all_presets();
@@ -980,12 +976,11 @@ static void RenderPiano() {
             }
         } else {
             // Normal button
+            ImVec2 textSize = ImGui::CalcTextSize(g_presets[i].name);
+            float btnWidth = textSize.x + ImGui::GetStyle().FramePadding.x * 2.0f + 4.0f;
             if (ImGui::Button(g_presets[i].name, ImVec2(btnWidth, 0))) {
                 g_fmPatch = g_presets[i].patch;
                 reload_fm_patch();
-                // Auto-save current patch to this preset slot
-                g_presets[i].patch = g_fmPatch;
-                save_all_presets();
                 log_cmd("Preset: %s", g_presets[i].name);
             }
             // Double-click to edit name
