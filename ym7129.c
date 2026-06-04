@@ -142,21 +142,22 @@ void ym7129_load_patch(uint8_t slot, uint8_t ch, const ym7129_patch_t *p) {
     // L/R/FB (linear per channel, not per operator)
     ym7129_write_reg(slot, YM7129_REG_BASE_LRFB + ch, p->feedback_lr);
 
-    // Modulator (off): KON=0, preserve VIB/WS/MUL bits
+    // Modulator (off): no KON bit on modulator, write directly
     ym7129_write_reg(slot, YM7129_REG_BASE_MLWS + off,     p->m_mlws & 0x7F);
-    // Modulator TL: direct value (confirmed from PSS-26 register dump)
     ym7129_write_reg(slot, YM7129_REG_BASE_TL   + off,     p->m_tl);
     ym7129_write_reg(slot, YM7129_REG_BASE_ARDR + off,     p->m_ardr);
     ym7129_write_reg(slot, YM7129_REG_BASE_SLRR + off,     p->m_slrr);
 
-    // Carrier (off+2): KON=0
-    ym7129_write_reg(slot, YM7129_REG_BASE_MLWS + off + 2, p->c_mlws & 0x7F);
+    // Carrier (off+2): preserve current KON state, only write bit6-0
+    // KON must be strictly managed by note_on/note_off/note_kill only
+    uint8_t cur_kon = ch_state[slot][ch].active ? 0x80 : 0x00;
+    ym7129_write_reg(slot, YM7129_REG_BASE_MLWS + off + 2, (p->c_mlws & 0x7F) | cur_kon);
     // Carrier TL: bit6-0 direct (velocity overrides at note-on)
     ym7129_write_reg(slot, YM7129_REG_BASE_TL   + off + 2, p->c_tl & 0x7F);
     ym7129_write_reg(slot, YM7129_REG_BASE_ARDR + off + 2, p->c_ardr);
     ym7129_write_reg(slot, YM7129_REG_BASE_SLRR + off + 2, p->c_slrr);
 
-    // Cache carrier params for note-on/off
+    // Cache carrier params for note-on/off (without KON)
     ch_state[slot][ch].c_mlws = p->c_mlws & 0x7F;
     ch_state[slot][ch].c_slrr = p->c_slrr;
 
@@ -236,10 +237,11 @@ void ym7129_note_kill(uint8_t slot, uint8_t ch) {
 
     ch_state[slot][ch].active = false;
 
-    // Immediate kill: KON=0, TL=max (silent)
+    // Immediate kill: first silence carrier, then clear KON
+    // Order matters: TL=max before KON=0 prevents any sound glitch
+    ym7129_write_reg(slot, YM7129_REG_BASE_TL + off + 2, 0x7F);     // carrier TL=max (silent)
     ym7129_write_reg(slot, YM7129_REG_BASE_MLWS + off + 2,
-                     ch_state[slot][ch].c_mlws & 0x7F); // KON=0
-    ym7129_write_reg(slot, YM7129_REG_BASE_TL + off + 2, 0x7F); // carrier TL=max
+                     ch_state[slot][ch].c_mlws & 0x7F);              // KON=0
     spfm_flush();
 }
 
