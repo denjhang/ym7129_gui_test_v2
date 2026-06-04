@@ -110,8 +110,8 @@ void ym7129_init(uint8_t slot) {
         ym7129_write_reg(slot, 0x50 + off,     0x00); // BLK=0, FNUM-H=0
         ym7129_write_reg(slot, 0x60 + off,     0x00); // FNUM-L=0
 
-        // L/R/FB
-        ym7129_write_reg(slot, 0x70 + ch,      0x00); // silent
+        // L/R/FB: enable L+R for all channels (also needed for drum output routing)
+        ym7129_write_reg(slot, 0x70 + ch,      0x60); // L+R, FB=0
     }
 }
 
