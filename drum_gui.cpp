@@ -214,6 +214,7 @@ static void load_all_presets() {
 
 static void piano_key_down(int note, int octave) {
     if (!g_connected) return;
+    if (g_editingPresetName >= 0) return;  // Don't play while editing preset name
     int midi_note = (octave + 2) * 12 + note;
 
     // Single channel: kill previous note first if any
@@ -325,6 +326,7 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 // ============================================================
 static void strike_drum(int idx) {
     if (!g_connected || idx < 0 || idx >= 12) return;
+    if (g_editingPresetName >= 0) return;  // Don't play while editing preset name
     const drum_pad_t *p = &DRUM_PADS[idx];
     // Restore all FM L/R to L+R before drum (YM7129 drum output routes through $70-$77)
     for (int ch = 0; ch < 8; ch++)
@@ -975,12 +977,12 @@ static void RenderPiano() {
             ImVec2 textSize = ImGui::CalcTextSize(g_presets[i].name);
             float btnWidth = textSize.x + ImGui::GetStyle().FramePadding.x * 2.0f + 20.0f;
             ImGui::SetNextItemWidth(btnWidth);
-            // Set keyboard focus to input field
-            ImGui::SetKeyboardFocusHere(-1);
+            // Keep focus on this input field while editing
+            ImGui::SetKeyboardFocusHere(0);
             int flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll;
             bool enterPressed = ImGui::InputText("##edit", g_presets[i].name, sizeof(g_presets[i].name), flags);
-            // Exit on Enter, Escape, or clicking another button
-            if (enterPressed || ImGui::IsKeyPressed(ImGuiKey_Escape) || (!ImGui::IsItemFocused() && !ImGui::IsItemHovered() && ImGui::IsMouseClicked(0))) {
+            // Exit on Enter or Escape
+            if (enterPressed || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                 g_editingPresetName = -1;
                 save_all_presets();
             }
