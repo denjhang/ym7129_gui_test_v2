@@ -6,6 +6,9 @@
  * Uses verified 3-byte raw protocol: [slot, 0x80, addr] [slot, 0x81, data]
  */
 
+// Include winsock2.h before windows.h (required by imgui_impl_win32.h)
+#include <winsock2.h>
+
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 #include "imgui/imgui_impl_win32.h"
@@ -15,7 +18,6 @@
 #include <dxgi.h>
 #include <tchar.h>
 
-#include <winsock2.h>
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
