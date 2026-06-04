@@ -367,10 +367,16 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 static void strike_drum(int idx) {
     if (!g_connected || idx < 0 || idx >= 12) return;
     const drum_pad_t *p = &DRUM_PADS[idx];
-    // Only mute drums ($84=0), do NOT touch FM registers
+    // Ensure all FM L/R channels are enabled for drum output
+    // YM7129 drum output may route through FM channel L/R ($70-$77)
+    for (int ch = 0; ch < 8; ch++)
+        ym7129_write_reg(g_slot, 0x70 + ch, 0x60); // L+R, FB=0
     ym7129_drum_mute(g_slot);
     log_cmd("Strike: %s (Rhy=%d L/H=%d Vol=%d)", p->name, p->rhy_type, p->lh, g_volume);
     ym7129_drum_strike(g_slot, p->channel, p->rhy_type, p->lh, (uint8_t)g_volume);
+    // Restore FM patch L/R/FB settings
+    for (int ch = 0; ch < 8; ch++)
+        ym7129_write_reg(g_slot, 0x70 + ch, g_fmPatch.feedback_lr);
     g_hitAnim[idx] = 1.0f;
 }
 
