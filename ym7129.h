@@ -16,12 +16,14 @@ extern "C" {
 // Test register - set to 0xFF on init
 #define YM7129_REG_TEST         0x01
 
-// Reg 0x10-0x1F: Kon / VIB / WS / ML  (Modulator @ offset, Carrier @ offset+2)
-// Bit7: KON (key-on), Bit6: VIB, Bit5: WS, Bit3-0: ML
+// Reg 0x10-0x1F: Kon / VIB / AM / WS / DM / EG-TYP / ML (wuqi verified)
+// Modulator (odd offset): Bit7=unused, Bit6=VIB, Bit5=DM, Bit4=EG-TYP, Bit3-0=ML
+// Carrier   (even offset+2): Bit7=KON, Bit6=AM, Bit5=WS, Bit4=EG-TYP, Bit3-0=ML
 #define YM7129_REG_BASE_MLWS    0x10
 
-// Reg 0x20-0x2F: DP / Volume (Total Level)
-// Bit7: DP (deep), Bit6-0: TL (total level, 0=loudest)
+// Reg 0x20-0x2F: Total Level
+// Modulator (even offset): Bit7-0: TL (8bit, 0=loudest, 255=quietest)
+// Carrier   (odd offset+2): Bit7=DP (force damping), Bit6-0: Volume (0=loudest)
 #define YM7129_REG_BASE_TL      0x20
 
 // Reg 0x30-0x3F: AR / DR

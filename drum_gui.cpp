@@ -121,20 +121,135 @@ static float g_pianoLevel[128] = {};
 // Editable FM patch (start with simple sine-like tone)
 static ym7129_patch_t g_fmPatch = {
     0x60, // feedback_lr: L+R, FB=0
-    0x00, // m_mlws: KON=0, ML=0
-    0xFF, // m_tl: mute
+    0x00, // m_mlws: DM=0, EG-TYP=0, ML=0
+    0xFF, // m_tl: mute (8bit)
     0x00, // m_ardr
     0x00, // m_slrr
-    0x0D, // c_mlws: KON=0, ML=13
-    0x30, // c_tl: volume
+    0x0D, // c_mlws: AM=0, EG-TYP=0, WS=0, ML=13
+    0x30, // c_tl: volume (7bit)
     0x58, // c_ardr: AR=5, DR=8
     0x0B, // c_slrr: SL=0, RR=11
 };
+
+// ============================================================
+// Preset patches (from wuqi hardware capture)
+// ============================================================
+struct PresetEntry { const char* name; ym7129_patch_t patch; };
+static const PresetEntry g_presets[] = {
+    {"Sine", {
+        0xE0, // feedback_lr: L+R, bit7=1, FB=0
+        0x00, // m_mlws: DM=0, ML=0
+        0xFF, // m_tl: mute
+        0x00, // m_ardr
+        0x00, // m_slrr
+        0x11, // c_mlws: EG-TYP=1, ML=1
+        0x30, // c_tl
+        0x00, // c_ardr
+        0x05, // c_slrr: SL=0, RR=5
+    }},
+    {"Carrier", {
+        0xE0, // feedback_lr: L+R, bit7=1, FB=0
+        0x00, // m_mlws: DM=0, ML=0
+        0x94, // m_tl: weak modulation
+        0x00, // m_ardr
+        0x00, // m_slrr
+        0x01, // c_mlws: ML=1
+        0x39, // c_tl
+        0x00, // c_ardr
+        0x06, // c_slrr: SL=0, RR=6
+    }},
+    {"UFO", {
+        0xC7, // feedback_lr: R=1, bit7=1, FB=7
+        0x90, // m_mlws: EG-TYP=1, DM=0, ML=0
+        0x51, // m_tl
+        0x90, // m_ardr: AR=9, DR=0
+        0x00, // m_slrr
+        0x90, // c_mlws: EG-TYP=1, ML=0
+        0x4A, // c_tl
+        0x90, // c_ardr: AR=9, DR=0
+        0x00, // c_slrr
+    }},
+    {"Chord", {
+        0xE5, // feedback_lr: L+R, bit7=1, FB=5
+        0x2A, // m_mlws: DM=1, ML=10
+        0x94, // m_tl: weak modulation
+        0xF6, // m_ardr: AR=15, DR=6
+        0x32, // m_slrr: SL=3, RR=2
+        0x04, // c_mlws: ML=4
+        0x42, // c_tl
+        0xB5, // c_ardr: AR=11, DR=5
+        0x00, // c_slrr: SL=0, RR=0
+    }},
+};
+static const int g_numPresets = sizeof(g_presets) / sizeof(PresetEntry);
+
+// User preset slot (saved to INI)
+static ym7129_patch_t g_userPatch = {0};
 
 static void reload_fm_patch() {
     if (!g_connected) return;
     for (int ch = 0; ch < 8; ch++)
         ym7129_load_patch(g_slot, ch, &g_fmPatch);
+}
+
+static char g_configPath[MAX_PATH] = "";
+
+static void load_fm_patch_config() {
+    if (g_configPath[0] == '\0') return;
+    g_fmPatch.feedback_lr = GetPrivateProfileIntA("FMPatch", "feedback_lr", g_fmPatch.feedback_lr, g_configPath);
+    g_fmPatch.m_mlws       = GetPrivateProfileIntA("FMPatch", "m_mlws", g_fmPatch.m_mlws, g_configPath);
+    g_fmPatch.m_tl         = GetPrivateProfileIntA("FMPatch", "m_tl", g_fmPatch.m_tl, g_configPath);
+    g_fmPatch.m_ardr       = GetPrivateProfileIntA("FMPatch", "m_ardr", g_fmPatch.m_ardr, g_configPath);
+    g_fmPatch.m_slrr       = GetPrivateProfileIntA("FMPatch", "m_slrr", g_fmPatch.m_slrr, g_configPath);
+    g_fmPatch.c_mlws       = GetPrivateProfileIntA("FMPatch", "c_mlws", g_fmPatch.c_mlws, g_configPath);
+    g_fmPatch.c_tl         = GetPrivateProfileIntA("FMPatch", "c_tl", g_fmPatch.c_tl, g_configPath);
+    g_fmPatch.c_ardr       = GetPrivateProfileIntA("FMPatch", "c_ardr", g_fmPatch.c_ardr, g_configPath);
+    g_fmPatch.c_slrr       = GetPrivateProfileIntA("FMPatch", "c_slrr", g_fmPatch.c_slrr, g_configPath);
+}
+
+static void save_fm_patch_config() {
+    if (g_configPath[0] == '\0') return;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", g_fmPatch.feedback_lr); WritePrivateProfileStringA("FMPatch", "feedback_lr", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_fmPatch.m_mlws);       WritePrivateProfileStringA("FMPatch", "m_mlws", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_fmPatch.m_tl);         WritePrivateProfileStringA("FMPatch", "m_tl", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_fmPatch.m_ardr);       WritePrivateProfileStringA("FMPatch", "m_ardr", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_fmPatch.m_slrr);       WritePrivateProfileStringA("FMPatch", "m_slrr", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_fmPatch.c_mlws);       WritePrivateProfileStringA("FMPatch", "c_mlws", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_fmPatch.c_tl);         WritePrivateProfileStringA("FMPatch", "c_tl", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_fmPatch.c_ardr);       WritePrivateProfileStringA("FMPatch", "c_ardr", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_fmPatch.c_slrr);       WritePrivateProfileStringA("FMPatch", "c_slrr", buf, g_configPath);
+}
+
+// ============================================================
+// User preset persistence (INI [UserPreset] section)
+// ============================================================
+static void save_user_preset_config() {
+    if (g_configPath[0] == '\0') return;
+    g_userPatch = g_fmPatch;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", g_userPatch.feedback_lr); WritePrivateProfileStringA("UserPreset", "feedback_lr", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_userPatch.m_mlws);       WritePrivateProfileStringA("UserPreset", "m_mlws", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_userPatch.m_tl);         WritePrivateProfileStringA("UserPreset", "m_tl", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_userPatch.m_ardr);       WritePrivateProfileStringA("UserPreset", "m_ardr", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_userPatch.m_slrr);       WritePrivateProfileStringA("UserPreset", "m_slrr", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_userPatch.c_mlws);       WritePrivateProfileStringA("UserPreset", "c_mlws", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_userPatch.c_tl);         WritePrivateProfileStringA("UserPreset", "c_tl", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_userPatch.c_ardr);       WritePrivateProfileStringA("UserPreset", "c_ardr", buf, g_configPath);
+    snprintf(buf, sizeof(buf), "%d", g_userPatch.c_slrr);       WritePrivateProfileStringA("UserPreset", "c_slrr", buf, g_configPath);
+}
+
+static void load_user_preset_config() {
+    if (g_configPath[0] == '\0') return;
+    g_userPatch.feedback_lr = GetPrivateProfileIntA("UserPreset", "feedback_lr", g_userPatch.feedback_lr, g_configPath);
+    g_userPatch.m_mlws       = GetPrivateProfileIntA("UserPreset", "m_mlws", g_userPatch.m_mlws, g_configPath);
+    g_userPatch.m_tl         = GetPrivateProfileIntA("UserPreset", "m_tl", g_userPatch.m_tl, g_configPath);
+    g_userPatch.m_ardr       = GetPrivateProfileIntA("UserPreset", "m_ardr", g_userPatch.m_ardr, g_configPath);
+    g_userPatch.m_slrr       = GetPrivateProfileIntA("UserPreset", "m_slrr", g_userPatch.m_slrr, g_configPath);
+    g_userPatch.c_mlws       = GetPrivateProfileIntA("UserPreset", "c_mlws", g_userPatch.c_mlws, g_configPath);
+    g_userPatch.c_tl         = GetPrivateProfileIntA("UserPreset", "c_tl", g_userPatch.c_tl, g_configPath);
+    g_userPatch.c_ardr       = GetPrivateProfileIntA("UserPreset", "c_ardr", g_userPatch.c_ardr, g_configPath);
+    g_userPatch.c_slrr       = GetPrivateProfileIntA("UserPreset", "c_slrr", g_userPatch.c_slrr, g_configPath);
 }
 
 static void piano_key_down(int note, int octave) {
@@ -151,8 +266,9 @@ static void piano_key_down(int note, int octave) {
 static void piano_key_up(int note, int octave) {
     if (!g_connected) return;
     int midi_note = (octave + 2) * 12 + note;
-    // Don't clear visual state here — let the decay loop fade out
-    // (same as DMPlayer: UpdateChannelLevels handles fadeout)
+    if (midi_note >= 0 && midi_note < 128) {
+        g_pianoChPlaying[midi_note] = -1; // mark released — decay will fade out
+    }
     ym7129_stop_note(g_slot, midi_note);
 }
 
@@ -538,16 +654,19 @@ static void RenderPiano() {
     int m_dr = g_fmPatch.m_ardr & 0x0F;
     int m_sl = (g_fmPatch.m_slrr >> 4) & 0x0F;
     int m_rr = g_fmPatch.m_slrr & 0x0F;
-    int m_tl = g_fmPatch.m_tl & 0x7F;
+    int m_tl = g_fmPatch.m_tl;  // 8bit (wuqi doc: modulator TL 0-255)
     int m_ml = g_fmPatch.m_mlws & 0x0F;
+    int m_eg = (g_fmPatch.m_mlws >> 4) & 1;  // modulator EG-TYP (bit4)
     int c_ar = (g_fmPatch.c_ardr >> 4) & 0x0F;
     int c_dr = (g_fmPatch.c_ardr & 0x0F);
     int c_sl = (g_fmPatch.c_slrr >> 4) & 0x0F;
     int c_rr = g_fmPatch.c_slrr & 0x0F;
     int c_tl = g_fmPatch.c_tl & 0x7F;
     int c_ml = g_fmPatch.c_mlws & 0x0F;
-    int m_ws = (g_fmPatch.m_mlws >> 5) & 1;
-    int c_ws = (g_fmPatch.c_mlws >> 5) & 1;
+    int c_eg = (g_fmPatch.c_mlws >> 4) & 1;  // carrier EG-TYP (bit4)
+    int m_dm = (g_fmPatch.m_mlws >> 5) & 1;  // modulator DM (bit5)
+    int c_ws = (g_fmPatch.c_mlws >> 5) & 1;  // carrier WS (bit5)
+    int c_am = (g_fmPatch.c_mlws >> 6) & 1;  // carrier AM (bit6)
 
     bool changed_fm = false;
 
@@ -571,14 +690,17 @@ static void RenderPiano() {
 
     // --- Operator table (furnace FMOperators) ---
     // Columns: OP | AR | DR | SL | RR | sep | TL | ML | WS | sep | Wave | Env
-    int numCols = 12;
+    int numCols = 14;
     int numOps = 2;
     float sliderH = 80.0f;
     ImVec2 sliderSz(20.0f, sliderH);
 
     // Helper: center slider in column (furnace CENTER_VSLIDER)
     auto centerVSlider = [&]() {
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x * 0.5f - sliderSz.x * 0.5f);
+        float x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x * 0.5f - sliderSz.x * 0.5f;
+        ImGui::SetCursorPosX(x);
+        ImGui::Dummy(ImVec2(0, 0));
+        ImGui::SetCursorPosX(x);
     };
 
     // Helper: draw waveform preview inside a BeginChild
@@ -656,15 +778,20 @@ static void RenderPiano() {
         ImGui::TableSetupColumn("s1",   ImGuiTableColumnFlags_WidthFixed);              // 5
         ImGui::TableSetupColumn("TL",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 6
         ImGui::TableSetupColumn("ML",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 7
-        ImGui::TableSetupColumn("WS",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 8
-        ImGui::TableSetupColumn("s2",   ImGuiTableColumnFlags_WidthFixed);              // 9
-        ImGui::TableSetupColumn("Wave", ImGuiTableColumnFlags_WidthStretch, 0.15f);    // 10
-        ImGui::TableSetupColumn("Env",  ImGuiTableColumnFlags_WidthStretch, 0.15f);    // 11
+        ImGui::TableSetupColumn("EG",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 8
+        ImGui::TableSetupColumn("DM/WS",ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 9
+        ImGui::TableSetupColumn("AM",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 10
+        ImGui::TableSetupColumn("s2",   ImGuiTableColumnFlags_WidthFixed);              // 11
+        ImGui::TableSetupColumn("Wave", ImGuiTableColumnFlags_WidthStretch, 0.15f);    // 12
+        ImGui::TableSetupColumn("Env",  ImGuiTableColumnFlags_WidthStretch, 0.15f);    // 13
 
         // Header row — center text in slider columns to align with sliders below
         auto centerText = [&]() {
             ImVec2 textSize = ImGui::CalcTextSize("XX");
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x * 0.5f - textSize.x * 0.5f);
+            float x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x * 0.5f - textSize.x * 0.5f;
+            ImGui::SetCursorPosX(x);
+            ImGui::Dummy(ImVec2(0, 0));
+            ImGui::SetCursorPosX(x);
         };
 
         ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
@@ -676,16 +803,18 @@ static void RenderPiano() {
         ImGui::TableNextColumn(); // sep
         ImGui::TableNextColumn(); centerText(); ImGui::Text("TL");
         ImGui::TableNextColumn(); centerText(); ImGui::Text("ML");
-        ImGui::TableNextColumn(); centerText(); ImGui::Text("WS");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("EG");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("DM/WS");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("AM");
         ImGui::TableNextColumn(); // sep
         ImGui::TableNextColumn(); centerText(); ImGui::Text("Wave");
         ImGui::TableNextColumn(); centerText(); ImGui::Text("Env");
 
         // Data: 2 operator rows
-        struct OpData { const char* name; int* ar; int* dr; int* sl; int* rr; int* tl; int* ml; int* ws; ImU32 color; };
+        struct OpData { const char* name; int* ar; int* dr; int* sl; int* rr; int* tl; int tlMax; int* ml; int* eg; int* dm; int* ws; int* am; ImU32 color; };
         OpData ops[2] = {
-            {"MOD", &m_ar, &m_dr, &m_sl, &m_rr, &m_tl, &m_ml, &m_ws, IM_COL32(100,255,100,255)},
-            {"CAR", &c_ar, &c_dr, &c_sl, &c_rr, &c_tl, &c_ml, &c_ws, IM_COL32(100,150,255,255)},
+            {"MOD", &m_ar, &m_dr, &m_sl, &m_rr, &m_tl, 255, &m_ml, &m_eg, &m_dm, NULL, NULL, IM_COL32(100,255,100,255)},
+            {"CAR", &c_ar, &c_dr, &c_sl, &c_rr, &c_tl, 127, &c_ml, &c_eg, NULL, &c_ws, &c_am, IM_COL32(100,150,255,255)},
         };
 
         for (int i = 0; i < numOps; i++) {
@@ -721,10 +850,10 @@ static void RenderPiano() {
             // sep
             ImGui::TableNextColumn();
 
-            // TL
+            // TL (MOD: 0-255, CAR: 0-127)
             ImGui::TableNextColumn(); centerVSlider();
             ImGui::PushID(i * 10 + 4);
-            if (ImGui::VSliderInt("##TL", sliderSz, o.tl, 0, 127)) changed_fm = true;
+            if (ImGui::VSliderInt("##TL", sliderSz, o.tl, 0, o.tlMax)) changed_fm = true;
             ImGui::PopID();
 
             // ML
@@ -733,14 +862,29 @@ static void RenderPiano() {
             if (ImGui::VSliderInt("##ML", sliderSz, o.ml, 0, 15)) changed_fm = true;
             ImGui::PopID();
 
-            // WS
+            // EG-TYP (bit4)
             ImGui::TableNextColumn(); centerVSlider();
             ImGui::PushID(i * 10 + 6);
-            if (ImGui::VSliderInt("##WS", sliderSz, o.ws, 0, 1)) changed_fm = true;
+            if (ImGui::VSliderInt("##EG", sliderSz, o.eg, 0, 1)) changed_fm = true;
             ImGui::PopID();
 
-            // sep
-            ImGui::TableNextColumn();
+            // DM (MOD) or WS (CAR)
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10 + 7);
+            if (o.dm) {
+                if (ImGui::VSliderInt("##DM", sliderSz, o.dm, 0, 1)) changed_fm = true;
+            } else if (o.ws) {
+                if (ImGui::VSliderInt("##WS", sliderSz, o.ws, 0, 1)) changed_fm = true;
+            }
+            ImGui::PopID();
+
+            // AM (carrier only)
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10 + 8);
+            if (o.am) {
+                if (ImGui::VSliderInt("##AM", sliderSz, o.am, 0, 1)) changed_fm = true;
+            }
+            ImGui::PopID();
 
             // sep
             ImGui::TableNextColumn();
@@ -748,13 +892,14 @@ static void RenderPiano() {
             // Wave preview (each op row has its own)
             ImGui::TableNextColumn();
             ImGui::PushID(i * 100 + 0);
-            drawWaveformChild("##wav", *o.ws != 0, o.color);
+            bool waveWs = o.dm ? (*o.dm != 0) : (o.ws ? (*o.ws != 0) : false);
+            drawWaveformChild("##wav", waveWs, o.color);
             ImGui::PopID();
 
             // ADSR preview (each op row has its own)
             ImGui::TableNextColumn();
             ImGui::PushID(i * 100 + 1);
-            drawADSRChild("##env", *o.ar, *o.dr, *o.sl, *o.rr, *o.tl, 127, o.color);
+            drawADSRChild("##env", *o.ar, *o.dr, *o.sl, *o.rr, *o.tl, o.tlMax, o.color);
             ImGui::PopID();
         }
 
@@ -765,14 +910,71 @@ static void RenderPiano() {
         g_fmPatch.feedback_lr = (fb & 0x07) | (l_on ? (1<<5) : 0) | (r_on ? (1<<6) : 0);
         g_fmPatch.m_ardr = ((m_ar & 0x0F) << 4) | (m_dr & 0x0F);
         g_fmPatch.m_slrr = ((m_sl & 0x0F) << 4) | (m_rr & 0x0F);
-        g_fmPatch.m_tl   = m_tl & 0x7F;
-        g_fmPatch.m_mlws = (m_ml & 0x0F) | ((m_ws & 1) << 5);
+        g_fmPatch.m_tl   = m_tl & 0xFF;                          // 8bit modulator TL
+        g_fmPatch.m_mlws = (m_ml & 0x0F) | ((m_eg & 1) << 4) | ((m_dm & 1) << 5);  // bit4=EG-TYP, bit5=DM
         g_fmPatch.c_ardr = ((c_ar & 0x0F) << 4) | (c_dr & 0x0F);
         g_fmPatch.c_slrr = ((c_sl & 0x0F) << 4) | (c_rr & 0x0F);
-        g_fmPatch.c_tl   = c_tl & 0x7F;
-        g_fmPatch.c_mlws = (c_ml & 0x0F) | ((c_ws & 1) << 5);
+        g_fmPatch.c_tl   = c_tl & 0x7F;                          // 7bit carrier TL
+        g_fmPatch.c_mlws = (c_ml & 0x0F) | ((c_eg & 1) << 4) | ((c_ws & 1) << 5) | ((c_am & 1) << 6);  // bit4=EG-TYP, bit5=WS, bit6=AM
         reload_fm_patch();
+        save_fm_patch_config();
+        save_user_preset_config();  // auto-save user preset on every slider change
     }
+
+    // ============================================================
+    // Preset buttons (wuqi hardware captured patches)
+    // ============================================================
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::Text("Presets:");
+
+    // Factory presets: Sine, Carrier, UFO, Chord
+    for (int i = 0; i < g_numPresets; i++) {
+        ImGui::PushID(i);
+        ImGui::SameLine();
+        if (ImGui::SmallButton(g_presets[i].name)) {
+            g_fmPatch = g_presets[i].patch;
+            reload_fm_patch();
+            save_fm_patch_config();
+            save_user_preset_config();
+            log_cmd("Preset: %s", g_presets[i].name);
+        }
+        ImGui::PopID();
+    }
+
+    // User preset: Save + Load
+    ImGui::SameLine();
+    ImGui::Spacing();
+    ImGui::SameLine();
+    ImGui::PushID(100);
+    if (ImGui::SmallButton("Save User")) {
+        g_userPatch = g_fmPatch;
+        save_user_preset_config();
+        log_cmd("User preset saved");
+    }
+    ImGui::PopID();
+
+    ImGui::PushID(101);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Load User")) {
+        // Check if user preset has ever been saved (non-zero feedback_lr is a good indicator)
+        bool hasUserPreset = false;
+        if (g_configPath[0] != '\0') {
+            char buf[32] = {};
+            GetPrivateProfileStringA("UserPreset", "feedback_lr", "", buf, sizeof(buf), g_configPath);
+            hasUserPreset = (buf[0] != '\0');
+        }
+        if (hasUserPreset) {
+            g_fmPatch = g_userPatch;
+            reload_fm_patch();
+            save_fm_patch_config();
+            log_cmd("User preset loaded");
+        } else {
+            log_cmd("No user preset saved yet");
+        }
+    }
+    ImGui::PopID();
 
     ImGui::End();
 }
@@ -827,7 +1029,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         char inipath[MAX_PATH];
         snprintf(inipath, sizeof(inipath), "%S", wbuf);
         io.IniFilename = strdup(inipath);
+        // Also set config path for FM patch (same dir, different file)
+        if (lastSlash) {
+            wcscpy(lastSlash + 1, L"ym7129_config.ini");
+            snprintf(g_configPath, sizeof(g_configPath), "%S", wbuf);
+        }
     }
+    load_fm_patch_config();
+    load_user_preset_config();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     // ViewportsEnable 暂时关闭 — 窗口不能拖出成为独立窗口
     // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
@@ -900,12 +1109,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         }
         for (int i = 0; i < 128; i++) {
             if (g_pianoLevel[i] > 0.0f) {
-                // Decay only after key release (key down keeps level at 1.0 via WM_KEYDOWN repeat guard)
-                // Decay speed: ~0.3s to fade out (same feel as FM release)
-                g_pianoLevel[i] -= dt * 3.0f;
-                if (g_pianoLevel[i] < 0.0f) g_pianoLevel[i] = 0.0f;
-                if (g_pianoLevel[i] <= 0.0f && g_pianoChPlaying[i] >= 0) {
-                    g_pianoChPlaying[i] = -1;
+                // Only decay after key release (g_pianoChPlaying < 0)
+                // While key is held, level stays at 1.0
+                if (g_pianoChPlaying[i] < 0) {
+                    g_pianoLevel[i] -= dt * 3.0f;
+                    if (g_pianoLevel[i] < 0.0f) g_pianoLevel[i] = 0.0f;
                 }
             }
         }
