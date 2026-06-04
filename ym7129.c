@@ -66,6 +66,8 @@ void ym7129_write_reg(uint8_t slot, uint8_t addr, uint8_t data) {
     cmd[0] = slot; cmd[1] = 0x80; cmd[2] = addr;  // A0=0, latch address
     cmd[3] = slot; cmd[4] = 0x81; cmd[5] = data;  // A0=1, write data
     spfm_write_raw(cmd, 6);
+    spfm_flush();
+    if (s_write_delay_us > 0) spfm_sleep_us(s_write_delay_us);
 }
 
 // ============================================================
@@ -83,7 +85,6 @@ void ym7129_mute(uint8_t slot) {
         ym7129_write_reg(slot, YM7129_REG_BASE_TL + off,       0x7F);
         ym7129_write_reg(slot, YM7129_REG_BASE_TL + off + 2,   0x7F);
     }
-    spfm_flush();
 }
 
 // ============================================================
@@ -94,7 +95,6 @@ void ym7129_init(uint8_t slot) {
 
     // Test register must be FF
     ym7129_write_reg(slot, YM7129_REG_TEST, 0xFF);
-    spfm_flush();
 
     // Full register init per waveform analysis section 6:
     // All channels: Carrier MLWS=0x0D (ML=13,KON=0), Carrier SLRR=0x0B (SL=0,RR=11)
@@ -123,7 +123,6 @@ void ym7129_init(uint8_t slot) {
         // L/R/FB
         ym7129_write_reg(slot, 0x70 + ch,      0x00); // silent
     }
-    spfm_flush();
 }
 
 // ============================================================
@@ -160,8 +159,6 @@ void ym7129_load_patch(uint8_t slot, uint8_t ch, const ym7129_patch_t *p) {
     // Cache carrier params for note-on/off (without KON)
     ch_state[slot][ch].c_mlws = p->c_mlws & 0x7F;
     ch_state[slot][ch].c_slrr = p->c_slrr;
-
-    spfm_flush();
 }
 
 // ============================================================
@@ -199,14 +196,10 @@ void ym7129_note_on(uint8_t slot, uint8_t ch, uint8_t midi_note, uint8_t velocit
     // Carrier TL from velocity (0=loud, 127=quiet), bit6-0
     ym7129_write_reg(slot, YM7129_REG_BASE_TL + off + 2, c_tl & 0x7F);
 
-    spfm_flush();
-
     // Key-On: set bit7 of Carrier MLWS (0x12+off = 0x10+off+2)
     // OPK.cpp UpdateKey: SetReg(0x12+chofs[ch], (cur & 0x7f) | 0x80)
     ym7129_write_reg(slot, YM7129_REG_BASE_MLWS + off + 2,
                      (ch_state[slot][ch].c_mlws & 0x7F) | 0x80);
-
-    spfm_flush();
 }
 
 // ============================================================
@@ -225,7 +218,6 @@ void ym7129_note_off(uint8_t slot, uint8_t ch) {
     ym7129_write_reg(slot, YM7129_REG_BASE_SLRR + off + 2, (sl << 4) | rr);
     ym7129_write_reg(slot, YM7129_REG_BASE_MLWS + off + 2,
                      ch_state[slot][ch].c_mlws & 0x7F); // KON=0
-    spfm_flush();
 }
 
 // ============================================================
@@ -242,7 +234,6 @@ void ym7129_note_kill(uint8_t slot, uint8_t ch) {
     ym7129_write_reg(slot, YM7129_REG_BASE_TL + off + 2, 0x7F);     // carrier TL=max (silent)
     ym7129_write_reg(slot, YM7129_REG_BASE_MLWS + off + 2,
                      ch_state[slot][ch].c_mlws & 0x7F);              // KON=0
-    spfm_flush();
 }
 
 // ============================================================
