@@ -369,9 +369,17 @@ static void strike_drum(int idx) {
     const drum_pad_t *p = &DRUM_PADS[idx];
     // Re-init chip before each strike (same as ym7129_drum_all.c)
     ym7129_init(g_slot);
-    spfm_flush();
     log_cmd("Strike: %s (Rhy=%d L/H=%d Vol=%d)", p->name, p->rhy_type, p->lh, g_volume);
     ym7129_drum_strike(g_slot, p->channel, p->rhy_type, p->lh, (uint8_t)g_volume);
+    // Restore FM patch on all channels after drum init wipes them
+    for (int ch = 0; ch < 8; ch++)
+        ym7129_load_patch(g_slot, ch, &g_fmPatch);
+    // If piano note was playing, retrigger it
+    if (g_pianoNotePlaying >= 0) {
+        int midi = g_pianoNotePlaying;
+        g_pianoNotePlaying = -1;  // reset so piano_key_down doesn't kill
+        piano_key_down(midi % 12, midi / 12 - 2);
+    }
     g_hitAnim[idx] = 1.0f;
 }
 
