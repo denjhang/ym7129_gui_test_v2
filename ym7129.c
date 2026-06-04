@@ -149,6 +149,7 @@ void ym7129_load_patch(uint8_t slot, uint8_t ch, const ym7129_patch_t *p) {
     // Cache carrier params for note-on/off (without KON)
     ch_state[slot][ch].c_mlws = p->c_mlws & 0x7F;
     ch_state[slot][ch].c_slrr = p->c_slrr;
+    ch_state[slot][ch].c_tl   = p->c_tl & 0x7F;
 }
 
 // ============================================================
@@ -172,9 +173,6 @@ void ym7129_note_on(uint8_t slot, uint8_t ch, uint8_t midi_note, uint8_t velocit
     ch_state[slot][ch].fnum      = fnum;
     ch_state[slot][ch].blk       = blk;
 
-    // Carrier TL from velocity: 0=loud(0), 127=quiet(63)
-    uint8_t c_tl = (uint8_t)((127 - velocity) >> 1);
-
     // Write frequency registers (OPK.cpp UpdateFreq):
     // If fnum >= 0x800, shift right and increment block (avoid overflow)
     if (fnum & 0x800) { fnum >>= 1; if (blk < 7) blk++; }
@@ -183,8 +181,8 @@ void ym7129_note_on(uint8_t slot, uint8_t ch, uint8_t midi_note, uint8_t velocit
     ym7129_write_reg(slot, 0x52 + off, ((blk & 0x07) << 5) | ((fnum >> 6) & 0x1F));
     ym7129_write_reg(slot, 0x62 + off, (uint8_t)((fnum << 2) & 0xF0));
 
-    // Carrier TL from velocity (0=loud, 127=quiet), bit6-0
-    ym7129_write_reg(slot, YM7129_REG_BASE_TL + off + 2, c_tl & 0x7F);
+    // Carrier TL from cached patch value (set by slider, not velocity)
+    ym7129_write_reg(slot, YM7129_REG_BASE_TL + off + 2, ch_state[slot][ch].c_tl & 0x7F);
 
     // Key-On: set bit7 of Carrier MLWS (0x12+off = 0x10+off+2)
     // OPK.cpp UpdateKey: SetReg(0x12+chofs[ch], (cur & 0x7f) | 0x80)

@@ -93,6 +93,7 @@ typedef struct {
     uint8_t  blk;
     uint8_t  c_mlws;   // cached carrier MLWS (without KON bit)
     uint8_t  c_slrr;   // cached carrier SLRR (for note-off release)
+    uint8_t  c_tl;     // cached carrier TL (bit6-0 volume)
 } ym7129_ch_t;
 
 // ============================================================

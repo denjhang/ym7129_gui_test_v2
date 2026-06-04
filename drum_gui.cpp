@@ -117,6 +117,8 @@ static int   g_currentOctave = 2; // Z=C4 (same as DMPlayer)
 static int   g_pianoNotePlaying = -1;  // current MIDI note, -1=none
 static int   g_pianoChannel = 0;       // always use channel 0 (single channel)
 static float g_pianoLevel = 0.0f;
+static int   g_velocity = 100;        // global velocity (0-127)
+static int   g_testE = 0;             // $00 TEST-E register
 
 // Editable FM patch (start with simple sine-like tone)
 static ym7129_patch_t g_fmPatch = {
@@ -261,7 +263,7 @@ static void piano_key_down(int note, int octave) {
         ym7129_note_kill(g_slot, (uint8_t)g_pianoChannel);
     }
 
-    ym7129_note_on(g_slot, (uint8_t)g_pianoChannel, (uint8_t)midi_note, 100);
+    ym7129_note_on(g_slot, (uint8_t)g_pianoChannel, (uint8_t)midi_note, (uint8_t)g_velocity);
     g_pianoNotePlaying = midi_note;
     g_pianoLevel = 1.0f;
     log_cmd("Piano ON: midi=%d", midi_note);
@@ -366,9 +368,14 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 static void strike_drum(int idx) {
     if (!g_connected || idx < 0 || idx >= 12) return;
     const drum_pad_t *p = &DRUM_PADS[idx];
+    // Restore all FM L/R to L+R before drum (YM7129 drum output routes through $70-$77)
+    for (int ch = 0; ch < 8; ch++)
+        ym7129_write_reg(g_slot, 0x70 + ch, 0x60);
     ym7129_drum_mute(g_slot);
     log_cmd("Strike: %s (Rhy=%d L/H=%d Vol=%d)", p->name, p->rhy_type, p->lh, g_volume);
     ym7129_drum_strike(g_slot, p->channel, p->rhy_type, p->lh, (uint8_t)g_volume);
+    // Reload FM patch L/R/FB for the piano channel
+    ym7129_write_reg(g_slot, 0x70 + g_pianoChannel, g_fmPatch.feedback_lr);
     g_hitAnim[idx] = 1.0f;
 }
 
@@ -507,50 +514,58 @@ static void RenderDrumPad() {
     ImGui::Spacing();
     ImGui::TextDisabled("[ ] = Volume   Keys: Num0-5,7,8,Num*,Num-,Num/,Num+");
 
-    // Drum pan debug: $78-$7F (wuqi marked unused, may control drum L/R/pan)
-    // Also show $70-$77 FM L/R/FB for comparison
+    // Drum register debug: $70-$88 (FM L/R + unknown + drum control)
     static bool drum_pan_debug = false;
-    static uint8_t drum_pan[16] = {};
+    static uint8_t drum_pan[25] = {}; // $70-$88 = 25 regs
     static bool drum_pan_inited = false;
     if (!drum_pan_inited) {
-        for (int i = 0; i < 8; i++) drum_pan[i] = 0x60; // $70-$77
+        for (int i = 0; i < 8; i++) drum_pan[i] = 0x60; // $70-$77 FM L+R
+        drum_pan[20] = 0x00; // $84 trigger = 0
         drum_pan_inited = true;
     }
     ImGui::Spacing();
-    ImGui::Checkbox("Pan Debug ($70-$7F)", &drum_pan_debug);
+    ImGui::Checkbox("Reg Debug ($70-$88)", &drum_pan_debug);
     if (drum_pan_debug) {
-        if (ImGui::BeginTable("PanDebug", 4, ImGuiTableFlags_SizingStretchSame)) {
+        if (ImGui::BeginTable("RegDebug", 4, ImGuiTableFlags_SizingStretchSame)) {
             ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
             ImGui::TableNextColumn(); ImGui::Text("Reg");
             ImGui::TableNextColumn(); ImGui::Text("Guess");
             ImGui::TableNextColumn(); ImGui::Text("Value");
             ImGui::TableNextColumn(); ImGui::Text("Bits");
-            for (int i = 0; i < 16; i++) {
+            for (int i = 0; i < 25; i++) {
+                int reg = 0x70 + i;
+                const char* guess;
+                if (i < 8)       guess = "FM L/R/FB";
+                else if (i < 16) guess = "Drum Pan?";
+                else if (i < 20) guess = "Drum Ctrl";
+                else             guess = "Drum Trg";
                 ImGui::TableNextRow();
-                ImGui::TableNextColumn(); ImGui::Text("$%02X", 0x70 + i);
-                ImGui::TableNextColumn(); ImGui::Text(i < 8 ? "FM L/R/FB" : "Drum Pan?");
+                ImGui::TableNextColumn(); ImGui::Text("$%02X", reg);
+                ImGui::TableNextColumn(); ImGui::Text("%s", guess);
                 ImGui::TableNextColumn();
                 ImGui::PushID(i);
                 ImGui::SetNextItemWidth(50);
                 int pv = drum_pan[i];
-                if (ImGui::InputInt("##pan", &pv, 0)) drum_pan[i] = (uint8_t)(pv & 0xFF);
+                if (ImGui::InputInt("##reg", &pv, 0)) drum_pan[i] = (uint8_t)(pv & 0xFF);
                 ImGui::PopID();
                 ImGui::TableNextColumn();
-                if (i < 8) ImGui::TextDisabled("R L ?? FB");
-                else ImGui::TextDisabled("unknown");
+                if (i < 8)       ImGui::TextDisabled("R L ?? FB");
+                else if (i < 16) ImGui::TextDisabled("unknown");
+                else if (i < 20) ImGui::TextDisabled("L/H Rhy Vol");
+                else             ImGui::TextDisabled("k3 k2 k1 k0");
             }
             ImGui::EndTable();
         }
         ImGui::Spacing();
         if (ImGui::Button("Apply All")) {
-            for (int i = 0; i < 16; i++)
+            for (int i = 0; i < 25; i++)
                 ym7129_write_reg(g_slot, 0x70 + i, drum_pan[i]);
-            log_cmd("Pan: $70-$7F applied");
+            log_cmd("Reg: $70-$88 applied");
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("Reset")) {
             for (int i = 0; i < 8; i++) drum_pan[i] = 0x60;
-            for (int i = 8; i < 16; i++) drum_pan[i] = 0x00;
+            for (int i = 8; i < 25; i++) drum_pan[i] = 0x00;
         }
     }
 
@@ -691,47 +706,52 @@ static void RenderPiano() {
     int fb  = g_fmPatch.feedback_lr & 0x07;
     bool l_on = (g_fmPatch.feedback_lr >> 5) & 1;
     bool r_on = (g_fmPatch.feedback_lr >> 6) & 1;
-    int m_ar = (g_fmPatch.m_ardr >> 4) & 0x0F;
+    int fb_bit7 = (g_fmPatch.feedback_lr >> 7) & 1;  // unknown global bit
+    bool bit7_on = fb_bit7 != 0;    int m_ar = (g_fmPatch.m_ardr >> 4) & 0x0F;
     int m_dr = g_fmPatch.m_ardr & 0x0F;
     int m_sl = (g_fmPatch.m_slrr >> 4) & 0x0F;
     int m_rr = g_fmPatch.m_slrr & 0x0F;
     int m_tl = g_fmPatch.m_tl;  // 8bit (wuqi doc: modulator TL 0-255)
     int m_ml = g_fmPatch.m_mlws & 0x0F;
     int m_eg = (g_fmPatch.m_mlws >> 4) & 1;  // modulator EG-TYP (bit4)
+    int m_vib = (g_fmPatch.m_mlws >> 6) & 1; // modulator VIB (bit6)
+    int m_dm = (g_fmPatch.m_mlws >> 5) & 1;  // modulator DM (bit5)
     int c_ar = (g_fmPatch.c_ardr >> 4) & 0x0F;
     int c_dr = (g_fmPatch.c_ardr & 0x0F);
     int c_sl = (g_fmPatch.c_slrr >> 4) & 0x0F;
     int c_rr = g_fmPatch.c_slrr & 0x0F;
     int c_tl = g_fmPatch.c_tl & 0x7F;
+    int c_dp = (g_fmPatch.c_tl >> 7) & 1;    // carrier DP (bit7)
     int c_ml = g_fmPatch.c_mlws & 0x0F;
     int c_eg = (g_fmPatch.c_mlws >> 4) & 1;  // carrier EG-TYP (bit4)
-    int m_dm = (g_fmPatch.m_mlws >> 5) & 1;  // modulator DM (bit5)
     int c_ws = (g_fmPatch.c_mlws >> 5) & 1;  // carrier WS (bit5)
     int c_am = (g_fmPatch.c_mlws >> 6) & 1;  // carrier AM (bit6)
 
     bool changed_fm = false;
 
-    // --- Top table: FB, L/R, Algorithm info (furnace fmDetails) ---
-    if (ImGui::BeginTable("fmDetails", 3, ImGuiTableFlags_SizingStretchSame)) {
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        if (ImGui::SliderInt("FB", &fb, 0, 7)) changed_fm = true;
-        ImGui::SameLine();
-        if (ImGui::Checkbox("L", &l_on)) changed_fm = true;
-        ImGui::SameLine();
-        if (ImGui::Checkbox("R", &r_on)) changed_fm = true;
-        ImGui::TableNextColumn();
-        ImGui::TextDisabled("YM7129 2-OP FM");
-        ImGui::TableNextColumn();
-        ImGui::TextDisabled("MOD->CAR");
-        ImGui::EndTable();
+    // --- Top row: FB, L/R, bit7, Velocity, TEST-E (global params) ---
+    if (ImGui::SliderInt("FB", &fb, 0, 7)) changed_fm = true;
+    ImGui::SameLine();
+    if (ImGui::Checkbox("L", &l_on)) changed_fm = true;
+    ImGui::SameLine();
+    if (ImGui::Checkbox("R", &r_on)) changed_fm = true;
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Bit7", &bit7_on)) { fb_bit7 = bit7_on ? 1 : 0; changed_fm = true; }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100);
+    if (ImGui::SliderInt("Vol", &g_velocity, 0, 127)) {}
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(60);
+    if (ImGui::InputInt("TEST-E", &g_testE, 0)) {
+        g_testE &= 0x0F; // 4 bits only
+        if (g_connected) ym7129_write_reg(g_slot, 0x00, (uint8_t)g_testE);
     }
 
     ImGui::Spacing();
 
     // --- Operator table (furnace FMOperators) ---
-    // Columns: OP | AR | DR | SL | RR | sep | TL | ML | WS | sep | Wave | Env
-    int numCols = 14;
+    // Columns: OP | AR | DR | SL | RR | sep | TL | ML | EG | VIB/WS | DM/AM | DP | sep | Wave | Env
+    int numCols = 16;
     int numOps = 2;
     float sliderH = 80.0f;
     ImVec2 sliderSz(20.0f, sliderH);
@@ -810,21 +830,21 @@ static void RenderPiano() {
     };
 
     if (ImGui::BeginTable("FMOperators", numCols, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Borders | ImGuiTableFlags_BordersV)) {
-        // Column setup (furnace: WidthFixed for name/sep, WidthStretch for sliders)
         ImGui::TableSetupColumn("OP",   ImGuiTableColumnFlags_WidthFixed);              // 0
-        ImGui::TableSetupColumn("AR",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 1
-        ImGui::TableSetupColumn("DR",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 2
-        ImGui::TableSetupColumn("SL",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 3
-        ImGui::TableSetupColumn("RR",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 4
+        ImGui::TableSetupColumn("AR",   ImGuiTableColumnFlags_WidthStretch, 0.04f);     // 1
+        ImGui::TableSetupColumn("DR",   ImGuiTableColumnFlags_WidthStretch, 0.04f);     // 2
+        ImGui::TableSetupColumn("SL",   ImGuiTableColumnFlags_WidthStretch, 0.04f);     // 3
+        ImGui::TableSetupColumn("RR",   ImGuiTableColumnFlags_WidthStretch, 0.04f);     // 4
         ImGui::TableSetupColumn("s1",   ImGuiTableColumnFlags_WidthFixed);              // 5
-        ImGui::TableSetupColumn("TL",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 6
-        ImGui::TableSetupColumn("ML",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 7
-        ImGui::TableSetupColumn("EG",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 8
-        ImGui::TableSetupColumn("DM/WS",ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 9
-        ImGui::TableSetupColumn("AM",   ImGuiTableColumnFlags_WidthStretch, 0.05f);     // 10
-        ImGui::TableSetupColumn("s2",   ImGuiTableColumnFlags_WidthFixed);              // 11
-        ImGui::TableSetupColumn("Wave", ImGuiTableColumnFlags_WidthStretch, 0.15f);    // 12
-        ImGui::TableSetupColumn("Env",  ImGuiTableColumnFlags_WidthStretch, 0.15f);    // 13
+        ImGui::TableSetupColumn("TL",   ImGuiTableColumnFlags_WidthStretch, 0.04f);     // 6
+        ImGui::TableSetupColumn("ML",   ImGuiTableColumnFlags_WidthStretch, 0.04f);     // 7
+        ImGui::TableSetupColumn("EG",   ImGuiTableColumnFlags_WidthStretch, 0.03f);     // 8
+        ImGui::TableSetupColumn("DM/WS",ImGuiTableColumnFlags_WidthStretch, 0.03f);     // 9
+        ImGui::TableSetupColumn("VIB/AM",ImGuiTableColumnFlags_WidthStretch, 0.03f);    // 10
+        ImGui::TableSetupColumn("DP",   ImGuiTableColumnFlags_WidthStretch, 0.03f);     // 11
+        ImGui::TableSetupColumn("s2",   ImGuiTableColumnFlags_WidthFixed);              // 12
+        ImGui::TableSetupColumn("Wave", ImGuiTableColumnFlags_WidthStretch, 0.12f);    // 13
+        ImGui::TableSetupColumn("Env",  ImGuiTableColumnFlags_WidthStretch, 0.12f);    // 14
 
         // Header row — center text in slider columns to align with sliders below
         auto centerText = [&]() {
@@ -846,16 +866,18 @@ static void RenderPiano() {
         ImGui::TableNextColumn(); centerText(); ImGui::Text("ML");
         ImGui::TableNextColumn(); centerText(); ImGui::Text("EG");
         ImGui::TableNextColumn(); centerText(); ImGui::Text("DM/WS");
-        ImGui::TableNextColumn(); centerText(); ImGui::Text("AM");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("VIB/AM");
+        ImGui::TableNextColumn(); centerText(); ImGui::Text("DP");
         ImGui::TableNextColumn(); // sep
         ImGui::TableNextColumn(); centerText(); ImGui::Text("Wave");
         ImGui::TableNextColumn(); centerText(); ImGui::Text("Env");
 
         // Data: 2 operator rows
-        struct OpData { const char* name; int* ar; int* dr; int* sl; int* rr; int* tl; int tlMax; int* ml; int* eg; int* dm; int* ws; int* am; ImU32 color; };
+        // dp: carrier only (modulator always NULL)
+        struct OpData { const char* name; int* ar; int* dr; int* sl; int* rr; int* tl; int tlMax; int* ml; int* eg; int* dm_ws; int* vib_am; int* dp; ImU32 color; };
         OpData ops[2] = {
-            {"MOD", &m_ar, &m_dr, &m_sl, &m_rr, &m_tl, 255, &m_ml, &m_eg, &m_dm, NULL, NULL, IM_COL32(100,255,100,255)},
-            {"CAR", &c_ar, &c_dr, &c_sl, &c_rr, &c_tl, 127, &c_ml, &c_eg, NULL, &c_ws, &c_am, IM_COL32(100,150,255,255)},
+            {"MOD", &m_ar, &m_dr, &m_sl, &m_rr, &m_tl, 255, &m_ml, &m_eg, &m_dm, &m_vib, NULL, IM_COL32(100,255,100,255)},
+            {"CAR", &c_ar, &c_dr, &c_sl, &c_rr, &c_tl, 127, &c_ml, &c_eg, &c_ws, &c_am, &c_dp, IM_COL32(100,150,255,255)},
         };
 
         for (int i = 0; i < numOps; i++) {
@@ -912,18 +934,24 @@ static void RenderPiano() {
             // DM (MOD) or WS (CAR)
             ImGui::TableNextColumn(); centerVSlider();
             ImGui::PushID(i * 10 + 7);
-            if (o.dm) {
-                if (ImGui::VSliderInt("##DM", sliderSz, o.dm, 0, 1)) changed_fm = true;
-            } else if (o.ws) {
-                if (ImGui::VSliderInt("##WS", sliderSz, o.ws, 0, 1)) changed_fm = true;
+            if (o.dm_ws) {
+                if (ImGui::VSliderInt("##DMWS", sliderSz, o.dm_ws, 0, 1)) changed_fm = true;
             }
             ImGui::PopID();
 
-            // AM (carrier only)
+            // VIB (MOD bit6) or AM (CAR bit6)
             ImGui::TableNextColumn(); centerVSlider();
             ImGui::PushID(i * 10 + 8);
-            if (o.am) {
-                if (ImGui::VSliderInt("##AM", sliderSz, o.am, 0, 1)) changed_fm = true;
+            if (o.vib_am) {
+                if (ImGui::VSliderInt("##VIBAM", sliderSz, o.vib_am, 0, 1)) changed_fm = true;
+            }
+            ImGui::PopID();
+
+            // DP (carrier TL bit7, modulator has none)
+            ImGui::TableNextColumn(); centerVSlider();
+            ImGui::PushID(i * 10 + 9);
+            if (o.dp) {
+                if (ImGui::VSliderInt("##DP", sliderSz, o.dp, 0, 1)) changed_fm = true;
             }
             ImGui::PopID();
 
@@ -933,7 +961,7 @@ static void RenderPiano() {
             // Wave preview (each op row has its own)
             ImGui::TableNextColumn();
             ImGui::PushID(i * 100 + 0);
-            bool waveWs = o.dm ? (*o.dm != 0) : (o.ws ? (*o.ws != 0) : false);
+            bool waveWs = o.dm_ws ? (*o.dm_ws != 0) : false;
             drawWaveformChild("##wav", waveWs, o.color);
             ImGui::PopID();
 
@@ -948,18 +976,18 @@ static void RenderPiano() {
     }
 
     if (changed_fm) {
-        g_fmPatch.feedback_lr = (fb & 0x07) | (l_on ? (1<<5) : 0) | (r_on ? (1<<6) : 0);
+        g_fmPatch.feedback_lr = (fb & 0x07) | (l_on ? (1<<5) : 0) | (r_on ? (1<<6) : 0) | (fb_bit7 ? (1<<7) : 0);
         g_fmPatch.m_ardr = ((m_ar & 0x0F) << 4) | (m_dr & 0x0F);
         g_fmPatch.m_slrr = ((m_sl & 0x0F) << 4) | (m_rr & 0x0F);
-        g_fmPatch.m_tl   = m_tl & 0xFF;                          // 8bit modulator TL
-        g_fmPatch.m_mlws = (m_ml & 0x0F) | ((m_eg & 1) << 4) | ((m_dm & 1) << 5);  // bit4=EG-TYP, bit5=DM
+        g_fmPatch.m_tl   = m_tl & 0xFF;                                                    // 8bit modulator TL
+        g_fmPatch.m_mlws = (m_ml & 0x0F) | ((m_eg & 1) << 4) | ((m_dm & 1) << 5) | ((m_vib & 1) << 6);  // bit4=EG, bit5=DM, bit6=VIB
         g_fmPatch.c_ardr = ((c_ar & 0x0F) << 4) | (c_dr & 0x0F);
         g_fmPatch.c_slrr = ((c_sl & 0x0F) << 4) | (c_rr & 0x0F);
-        g_fmPatch.c_tl   = c_tl & 0x7F;                          // 7bit carrier TL
-        g_fmPatch.c_mlws = (c_ml & 0x0F) | ((c_eg & 1) << 4) | ((c_ws & 1) << 5) | ((c_am & 1) << 6);  // bit4=EG-TYP, bit5=WS, bit6=AM
+        g_fmPatch.c_tl   = (c_tl & 0x7F) | ((c_dp & 1) << 7);                              // bit7=DP, bit6-0=vol
+        g_fmPatch.c_mlws = (c_ml & 0x0F) | ((c_eg & 1) << 4) | ((c_ws & 1) << 5) | ((c_am & 1) << 6);   // bit4=EG, bit5=WS, bit6=AM
         reload_fm_patch();
         save_fm_patch_config();
-        save_user_preset_config();  // auto-save user preset on every slider change
+        save_user_preset_config();
     }
 
     // ============================================================
