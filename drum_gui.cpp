@@ -943,11 +943,18 @@ static void RenderPiano() {
         g_fmPatch.c_tl   = (c_tl & 0x7F) | ((c_dp & 1) << 7);                              // bit7=DP, bit6-0=vol
         g_fmPatch.c_mlws = (c_ml & 0x0F) | ((c_eg & 1) << 4) | ((c_ws & 1) << 5) | ((c_am & 1) << 6);   // bit4=EG, bit5=WS, bit6=AM
         reload_fm_patch();
-        // On mouse release, save to current preset slot
-        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-            g_presets[g_currentPresetSlot].patch = g_fmPatch;
-            save_all_presets();
-        }
+    }
+
+    // Save to preset slot when mouse is released (after any changes)
+    static bool g_hasUnsavedChanges = false;
+    if (changed_fm) {
+        g_hasUnsavedChanges = true;
+    }
+    if (g_hasUnsavedChanges && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        g_presets[g_currentPresetSlot].patch = g_fmPatch;
+        save_all_presets();
+        g_hasUnsavedChanges = false;
+        log_cmd("Saved to preset slot %d", g_currentPresetSlot);
     }
 
     // ============================================================
@@ -968,12 +975,12 @@ static void RenderPiano() {
             ImVec2 textSize = ImGui::CalcTextSize(g_presets[i].name);
             float btnWidth = textSize.x + ImGui::GetStyle().FramePadding.x * 2.0f + 20.0f;
             ImGui::SetNextItemWidth(btnWidth);
-            if (ImGui::InputText("##edit", g_presets[i].name, sizeof(g_presets[i].name), ImGuiInputTextFlags_EnterReturnsTrue)) {
-                g_editingPresetName = -1;
-                save_all_presets();
-            }
-            // Lose focus on click elsewhere
-            if (!ImGui::IsItemFocused() && g_editingPresetName == i) {
+            // Set keyboard focus to input field
+            ImGui::SetKeyboardFocusHere(-1);
+            int flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll;
+            bool enterPressed = ImGui::InputText("##edit", g_presets[i].name, sizeof(g_presets[i].name), flags);
+            // Exit on Enter, Escape, or clicking another button
+            if (enterPressed || ImGui::IsKeyPressed(ImGuiKey_Escape) || (!ImGui::IsItemFocused() && !ImGui::IsItemHovered() && ImGui::IsMouseClicked(0))) {
                 g_editingPresetName = -1;
                 save_all_presets();
             }
@@ -985,7 +992,7 @@ static void RenderPiano() {
                 g_fmPatch = g_presets[i].patch;
                 g_currentPresetSlot = i;  // Set as active preset slot
                 reload_fm_patch();
-                log_cmd("Preset: %s", g_presets[i].name);
+                log_cmd("Loaded preset %d: %s", i, g_presets[i].name);
             }
             // Double-click to edit name
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
