@@ -425,9 +425,6 @@ static void do_connect() {
     }
     g_connected = true;
     ym7129_init(g_slot);
-    // Load default FM patch on all 8 channels
-    for (int ch = 0; ch < 8; ch++)
-        ym7129_load_patch(g_slot, ch, &g_fmPatch);
     Sleep(100);
     log_cmd("Connected");
 }
