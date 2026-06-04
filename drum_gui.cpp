@@ -136,59 +136,27 @@ static ym7129_patch_t g_fmPatch = {
 };
 
 // ============================================================
-// Preset patches (from wuqi hardware capture)
+// 10 Preset slots (editable names + patches, auto-saved to INI)
 // ============================================================
-struct PresetEntry { const char* name; ym7129_patch_t patch; };
-static const PresetEntry g_presets[] = {
-    {"Sine", {
-        0xE0, // feedback_lr: L+R, bit7=1, FB=0
-        0x00, // m_mlws: DM=0, ML=0
-        0xFF, // m_tl: mute
-        0x00, // m_ardr
-        0x00, // m_slrr
-        0x11, // c_mlws: EG-TYP=1, ML=1
-        0x30, // c_tl
-        0x00, // c_ardr
-        0x05, // c_slrr: SL=0, RR=5
-    }},
-    {"Carrier", {
-        0xE0, // feedback_lr: L+R, bit7=1, FB=0
-        0x00, // m_mlws: DM=0, ML=0
-        0x94, // m_tl: weak modulation
-        0x00, // m_ardr
-        0x00, // m_slrr
-        0x01, // c_mlws: ML=1
-        0x39, // c_tl
-        0x00, // c_ardr
-        0x06, // c_slrr: SL=0, RR=6
-    }},
-    {"UFO", {
-        0xC7, // feedback_lr: R=1, bit7=1, FB=7
-        0x90, // m_mlws: EG-TYP=1, DM=0, ML=0
-        0x51, // m_tl
-        0x90, // m_ardr: AR=9, DR=0
-        0x00, // m_slrr
-        0x90, // c_mlws: EG-TYP=1, ML=0
-        0x4A, // c_tl
-        0x90, // c_ardr: AR=9, DR=0
-        0x00, // c_slrr
-    }},
-    {"Chord", {
-        0xE5, // feedback_lr: L+R, bit7=1, FB=5
-        0x2A, // m_mlws: DM=1, ML=10
-        0x94, // m_tl: weak modulation
-        0xF6, // m_ardr: AR=15, DR=6
-        0x32, // m_slrr: SL=3, RR=2
-        0x04, // c_mlws: ML=4
-        0x42, // c_tl
-        0xB5, // c_ardr: AR=11, DR=5
-        0x00, // c_slrr: SL=0, RR=0
-    }},
+static const int NUM_PRESETS = 10;
+struct PresetSlot {
+    char name[32];
+    ym7129_patch_t patch;
 };
-static const int g_numPresets = sizeof(g_presets) / sizeof(PresetEntry);
-
-// User preset slot (saved to INI)
-static ym7129_patch_t g_userPatch = {0};
+static PresetSlot g_presets[NUM_PRESETS] = {
+    {"Sine",    {0xE0, 0x00, 0xFF, 0x00, 0x00, 0x11, 0x30, 0x00, 0x05}},
+    {"Carrier",{0xE0, 0x00, 0x94, 0x00, 0x00, 0x01, 0x39, 0x00, 0x06}},
+    {"UFO",     {0xC7, 0x90, 0x51, 0x90, 0x00, 0x90, 0x4A, 0x90, 0x00}},
+    {"Chord",   {0xE5, 0x2A, 0x94, 0xF6, 0x32, 0x04, 0x42, 0xB5, 0x00}},
+    {"User1",   {0}},
+    {"User2",   {0}},
+    {"User3",   {0}},
+    {"User4",   {0}},
+    {"User5",   {0}},
+    {"User6",   {0}},
+};
+// Track which preset name is being edited (double-click)
+static int g_editingPresetName = -1;
 
 static void reload_fm_patch() {
     if (!g_connected) return;
@@ -198,62 +166,48 @@ static void reload_fm_patch() {
 
 static char g_configPath[MAX_PATH] = "";
 
-static void load_fm_patch_config() {
-    if (g_configPath[0] == '\0') return;
-    g_fmPatch.feedback_lr = GetPrivateProfileIntA("FMPatch", "feedback_lr", g_fmPatch.feedback_lr, g_configPath);
-    g_fmPatch.m_mlws       = GetPrivateProfileIntA("FMPatch", "m_mlws", g_fmPatch.m_mlws, g_configPath);
-    g_fmPatch.m_tl         = GetPrivateProfileIntA("FMPatch", "m_tl", g_fmPatch.m_tl, g_configPath);
-    g_fmPatch.m_ardr       = GetPrivateProfileIntA("FMPatch", "m_ardr", g_fmPatch.m_ardr, g_configPath);
-    g_fmPatch.m_slrr       = GetPrivateProfileIntA("FMPatch", "m_slrr", g_fmPatch.m_slrr, g_configPath);
-    g_fmPatch.c_mlws       = GetPrivateProfileIntA("FMPatch", "c_mlws", g_fmPatch.c_mlws, g_configPath);
-    g_fmPatch.c_tl         = GetPrivateProfileIntA("FMPatch", "c_tl", g_fmPatch.c_tl, g_configPath);
-    g_fmPatch.c_ardr       = GetPrivateProfileIntA("FMPatch", "c_ardr", g_fmPatch.c_ardr, g_configPath);
-    g_fmPatch.c_slrr       = GetPrivateProfileIntA("FMPatch", "c_slrr", g_fmPatch.c_slrr, g_configPath);
-}
-
-static void save_fm_patch_config() {
-    if (g_configPath[0] == '\0') return;
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%d", g_fmPatch.feedback_lr); WritePrivateProfileStringA("FMPatch", "feedback_lr", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_fmPatch.m_mlws);       WritePrivateProfileStringA("FMPatch", "m_mlws", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_fmPatch.m_tl);         WritePrivateProfileStringA("FMPatch", "m_tl", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_fmPatch.m_ardr);       WritePrivateProfileStringA("FMPatch", "m_ardr", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_fmPatch.m_slrr);       WritePrivateProfileStringA("FMPatch", "m_slrr", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_fmPatch.c_mlws);       WritePrivateProfileStringA("FMPatch", "c_mlws", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_fmPatch.c_tl);         WritePrivateProfileStringA("FMPatch", "c_tl", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_fmPatch.c_ardr);       WritePrivateProfileStringA("FMPatch", "c_ardr", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_fmPatch.c_slrr);       WritePrivateProfileStringA("FMPatch", "c_slrr", buf, g_configPath);
-}
-
 // ============================================================
-// User preset persistence (INI [UserPreset] section)
+// Preset persistence (INI [Preset0]...[Preset9] sections)
 // ============================================================
-static void save_user_preset_config() {
+static void save_all_presets() {
     if (g_configPath[0] == '\0') return;
-    g_userPatch = g_fmPatch;
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%d", g_userPatch.feedback_lr); WritePrivateProfileStringA("UserPreset", "feedback_lr", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_userPatch.m_mlws);       WritePrivateProfileStringA("UserPreset", "m_mlws", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_userPatch.m_tl);         WritePrivateProfileStringA("UserPreset", "m_tl", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_userPatch.m_ardr);       WritePrivateProfileStringA("UserPreset", "m_ardr", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_userPatch.m_slrr);       WritePrivateProfileStringA("UserPreset", "m_slrr", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_userPatch.c_mlws);       WritePrivateProfileStringA("UserPreset", "c_mlws", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_userPatch.c_tl);         WritePrivateProfileStringA("UserPreset", "c_tl", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_userPatch.c_ardr);       WritePrivateProfileStringA("UserPreset", "c_ardr", buf, g_configPath);
-    snprintf(buf, sizeof(buf), "%d", g_userPatch.c_slrr);       WritePrivateProfileStringA("UserPreset", "c_slrr", buf, g_configPath);
+    for (int i = 0; i < NUM_PRESETS; i++) {
+        char section[32];
+        snprintf(section, sizeof(section), "Preset%d", i);
+        // Save name
+        WritePrivateProfileStringA(section, "name", g_presets[i].name, g_configPath);
+        // Save patch
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", g_presets[i].patch.feedback_lr); WritePrivateProfileStringA(section, "feedback_lr", buf, g_configPath);
+        snprintf(buf, sizeof(buf), "%d", g_presets[i].patch.m_mlws);       WritePrivateProfileStringA(section, "m_mlws", buf, g_configPath);
+        snprintf(buf, sizeof(buf), "%d", g_presets[i].patch.m_tl);         WritePrivateProfileStringA(section, "m_tl", buf, g_configPath);
+        snprintf(buf, sizeof(buf), "%d", g_presets[i].patch.m_ardr);       WritePrivateProfileStringA(section, "m_ardr", buf, g_configPath);
+        snprintf(buf, sizeof(buf), "%d", g_presets[i].patch.m_slrr);       WritePrivateProfileStringA(section, "m_slrr", buf, g_configPath);
+        snprintf(buf, sizeof(buf), "%d", g_presets[i].patch.c_mlws);       WritePrivateProfileStringA(section, "c_mlws", buf, g_configPath);
+        snprintf(buf, sizeof(buf), "%d", g_presets[i].patch.c_tl);         WritePrivateProfileStringA(section, "c_tl", buf, g_configPath);
+        snprintf(buf, sizeof(buf), "%d", g_presets[i].patch.c_ardr);       WritePrivateProfileStringA(section, "c_ardr", buf, g_configPath);
+        snprintf(buf, sizeof(buf), "%d", g_presets[i].patch.c_slrr);       WritePrivateProfileStringA(section, "c_slrr", buf, g_configPath);
+    }
 }
 
-static void load_user_preset_config() {
+static void load_all_presets() {
     if (g_configPath[0] == '\0') return;
-    g_userPatch.feedback_lr = GetPrivateProfileIntA("UserPreset", "feedback_lr", g_userPatch.feedback_lr, g_configPath);
-    g_userPatch.m_mlws       = GetPrivateProfileIntA("UserPreset", "m_mlws", g_userPatch.m_mlws, g_configPath);
-    g_userPatch.m_tl         = GetPrivateProfileIntA("UserPreset", "m_tl", g_userPatch.m_tl, g_configPath);
-    g_userPatch.m_ardr       = GetPrivateProfileIntA("UserPreset", "m_ardr", g_userPatch.m_ardr, g_configPath);
-    g_userPatch.m_slrr       = GetPrivateProfileIntA("UserPreset", "m_slrr", g_userPatch.m_slrr, g_configPath);
-    g_userPatch.c_mlws       = GetPrivateProfileIntA("UserPreset", "c_mlws", g_userPatch.c_mlws, g_configPath);
-    g_userPatch.c_tl         = GetPrivateProfileIntA("UserPreset", "c_tl", g_userPatch.c_tl, g_configPath);
-    g_userPatch.c_ardr       = GetPrivateProfileIntA("UserPreset", "c_ardr", g_userPatch.c_ardr, g_configPath);
-    g_userPatch.c_slrr       = GetPrivateProfileIntA("UserPreset", "c_slrr", g_userPatch.c_slrr, g_configPath);
+    for (int i = 0; i < NUM_PRESETS; i++) {
+        char section[32];
+        snprintf(section, sizeof(section), "Preset%d", i);
+        // Load name
+        GetPrivateProfileStringA(section, "name", g_presets[i].name, g_presets[i].name, sizeof(g_presets[i].name), g_configPath);
+        // Load patch
+        g_presets[i].patch.feedback_lr = GetPrivateProfileIntA(section, "feedback_lr", g_presets[i].patch.feedback_lr, g_configPath);
+        g_presets[i].patch.m_mlws       = GetPrivateProfileIntA(section, "m_mlws", g_presets[i].patch.m_mlws, g_configPath);
+        g_presets[i].patch.m_tl         = GetPrivateProfileIntA(section, "m_tl", g_presets[i].patch.m_tl, g_configPath);
+        g_presets[i].patch.m_ardr       = GetPrivateProfileIntA(section, "m_ardr", g_presets[i].patch.m_ardr, g_configPath);
+        g_presets[i].patch.m_slrr       = GetPrivateProfileIntA(section, "m_slrr", g_presets[i].patch.m_slrr, g_configPath);
+        g_presets[i].patch.c_mlws       = GetPrivateProfileIntA(section, "c_mlws", g_presets[i].patch.c_mlws, g_configPath);
+        g_presets[i].patch.c_tl         = GetPrivateProfileIntA(section, "c_tl", g_presets[i].patch.c_tl, g_configPath);
+        g_presets[i].patch.c_ardr       = GetPrivateProfileIntA(section, "c_ardr", g_presets[i].patch.c_ardr, g_configPath);
+        g_presets[i].patch.c_slrr       = GetPrivateProfileIntA(section, "c_slrr", g_presets[i].patch.c_slrr, g_configPath);
+    }
 }
 
 static void piano_key_down(int note, int octave) {
@@ -987,8 +941,7 @@ static void RenderPiano() {
         g_fmPatch.c_tl   = (c_tl & 0x7F) | ((c_dp & 1) << 7);                              // bit7=DP, bit6-0=vol
         g_fmPatch.c_mlws = (c_ml & 0x0F) | ((c_eg & 1) << 4) | ((c_ws & 1) << 5) | ((c_am & 1) << 6);   // bit4=EG, bit5=WS, bit6=AM
         reload_fm_patch();
-        save_fm_patch_config();
-        save_user_preset_config();
+        save_all_presets();
     }
 
     // ============================================================
@@ -999,52 +952,49 @@ static void RenderPiano() {
     ImGui::Spacing();
     ImGui::Text("Presets:");
 
-    // Factory presets: Sine, Carrier, UFO, Chord
-    for (int i = 0; i < g_numPresets; i++) {
+    // 10 preset buttons (auto-width based on name)
+    for (int i = 0; i < NUM_PRESETS; i++) {
         ImGui::PushID(i);
-        ImGui::SameLine();
-        if (ImGui::SmallButton(g_presets[i].name)) {
-            g_fmPatch = g_presets[i].patch;
-            reload_fm_patch();
-            save_fm_patch_config();
-            save_user_preset_config();
-            log_cmd("Preset: %s", g_presets[i].name);
+        if (i > 0) ImGui::SameLine();
+
+        // Calculate button width based on text
+        ImVec2 textSize = ImGui::CalcTextSize(g_presets[i].name);
+        float btnWidth = textSize.x + ImGui::GetStyle().FramePadding.x * 2.0f + 4.0f;
+
+        // Check for double-click to edit name
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+            g_editingPresetName = i;
+        }
+
+        // If editing this preset's name, show input field
+        if (g_editingPresetName == i) {
+            ImGui::SetNextItemWidth(btnWidth + 20);
+            if (ImGui::InputText("##edit", g_presets[i].name, sizeof(g_presets[i].name), ImGuiInputTextFlags_EnterReturnsTrue)) {
+                g_editingPresetName = -1;
+                save_all_presets();
+            }
+            // Lose focus on click elsewhere
+            if (!ImGui::IsItemFocused() && g_editingPresetName == i) {
+                g_editingPresetName = -1;
+                save_all_presets();
+            }
+        } else {
+            // Normal button
+            if (ImGui::Button(g_presets[i].name, ImVec2(btnWidth, 0))) {
+                g_fmPatch = g_presets[i].patch;
+                reload_fm_patch();
+                // Auto-save current patch to this preset slot
+                g_presets[i].patch = g_fmPatch;
+                save_all_presets();
+                log_cmd("Preset: %s", g_presets[i].name);
+            }
+            // Double-click to edit name
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+                g_editingPresetName = i;
+            }
         }
         ImGui::PopID();
     }
-
-    // User preset: Save + Load
-    ImGui::SameLine();
-    ImGui::Spacing();
-    ImGui::SameLine();
-    ImGui::PushID(100);
-    if (ImGui::SmallButton("Save User")) {
-        g_userPatch = g_fmPatch;
-        save_user_preset_config();
-        log_cmd("User preset saved");
-    }
-    ImGui::PopID();
-
-    ImGui::PushID(101);
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Load User")) {
-        // Check if user preset has ever been saved (non-zero feedback_lr is a good indicator)
-        bool hasUserPreset = false;
-        if (g_configPath[0] != '\0') {
-            char buf[32] = {};
-            GetPrivateProfileStringA("UserPreset", "feedback_lr", "", buf, sizeof(buf), g_configPath);
-            hasUserPreset = (buf[0] != '\0');
-        }
-        if (hasUserPreset) {
-            g_fmPatch = g_userPatch;
-            reload_fm_patch();
-            save_fm_patch_config();
-            log_cmd("User preset loaded");
-        } else {
-            log_cmd("No user preset saved yet");
-        }
-    }
-    ImGui::PopID();
 
     ImGui::End();
 }
@@ -1105,8 +1055,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             snprintf(g_configPath, sizeof(g_configPath), "%S", wbuf);
         }
     }
-    load_fm_patch_config();
-    load_user_preset_config();
+    load_all_presets();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     // ViewportsEnable 暂时关闭 — 窗口不能拖出成为独立窗口
     // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
