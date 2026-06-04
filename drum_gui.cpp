@@ -728,6 +728,7 @@ static void RenderPiano() {
     bool changed_fm = false;
 
     // --- Top row: FB, L/R, bit7, Velocity, TEST-E (global params) ---
+    ImGui::SetNextItemWidth(80);
     if (ImGui::SliderInt("FB", &fb, 0, 7)) changed_fm = true;
     ImGui::SameLine();
     if (ImGui::Checkbox("L", &l_on)) changed_fm = true;
