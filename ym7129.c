@@ -114,6 +114,7 @@ void ym7129_init(uint8_t slot) {
         ym7129_write_reg(slot, 0x70 + ch,      0x60); // L+R, FB=0
     }
 }
+}
 
 // ============================================================
 // Load patch onto one logical channel
@@ -268,18 +269,19 @@ void ym7129_drum_strike(uint8_t slot, uint8_t channel, uint8_t rhy_type, uint8_t
     // Mute all drums first (reset $84 to 0)
     drum_trigger_state[slot] = 0;
     ym7129_write_reg(slot, 0x84, 0x00);
-    spfm_sleep_us(1700);
+
+    // Write $78-$7F = L+R (possibly drum channel pan, undocumented)
+    for (int i = 0; i < 8; i++)
+        ym7129_write_reg(slot, 0x78 + i, 0x60);
 
     // Write rhythm type/volume to $80+channel
     uint8_t type_val = (lh << 7) | ((rhy_type & 7) << 4) | (volume & 0x0F);
     ym7129_write_reg(slot, 0x80 + channel, type_val);
-    spfm_sleep_us(1700);
 
     // Clear target bit, then set (rising edge trigger)
     uint8_t bit_mask = (1 << channel);
     drum_trigger_state[slot] &= ~bit_mask;
     ym7129_write_reg(slot, 0x84, drum_trigger_state[slot]);
-    spfm_sleep_us(1700);
 
     drum_trigger_state[slot] |= bit_mask;
     ym7129_write_reg(slot, 0x84, drum_trigger_state[slot]);
