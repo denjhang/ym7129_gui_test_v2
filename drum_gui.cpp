@@ -416,6 +416,15 @@ static void on_key_up(int vk) {
     }
 }
 
+static void do_reset() {
+    if (!g_connected) return;
+    ym7129_mute(g_slot);
+    ym7129_drum_mute(g_slot);
+    Sleep(50);
+    ym7129_init(g_slot);
+    log_cmd("Reset");
+}
+
 static void do_connect() {
     if (g_connected) return;
     if (spfm_init(0) != 0) {
@@ -424,11 +433,7 @@ static void do_connect() {
         return;
     }
     g_connected = true;
-    ym7129_mute(g_slot);
-    ym7129_drum_mute(g_slot);
-    Sleep(50);
-    ym7129_init(g_slot);
-    Sleep(100);
+    do_reset();
     log_cmd("Connected");
 }
 
@@ -440,15 +445,6 @@ static void do_disconnect() {
     spfm_cleanup();
     g_connected = false;
     log_cmd("Disconnected");
-}
-
-static void do_reset() {
-    if (!g_connected) return;
-    ym7129_mute(g_slot);
-    ym7129_drum_mute(g_slot);
-    Sleep(50);
-    ym7129_init(g_slot);
-    log_cmd("Reset");
 }
 
 // ============================================================
