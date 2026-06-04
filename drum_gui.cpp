@@ -424,6 +424,9 @@ static void do_connect() {
         return;
     }
     g_connected = true;
+    ym7129_mute(g_slot);
+    ym7129_drum_mute(g_slot);
+    Sleep(50);
     ym7129_init(g_slot);
     Sleep(100);
     log_cmd("Connected");
