@@ -3,3 +3,4 @@
 *.dll
 libftd2xx.a
 build/
+*.zip
