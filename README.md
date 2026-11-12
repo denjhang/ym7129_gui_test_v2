@@ -2,6 +2,9 @@
 
 YM7129 音色编辑器 + 鼓垫 + FM 钢琴键盘，基于 ImGui + DirectX11，使用 SPFM Light 3字节 raw 协议。
 
+当前版本 **v1.0.0**（2026-11-12）。直接下载 `drum_gui.exe` + `ftd2xx64.dll` 放到同一目录即可运行，
+无需安装 MinGW/VC 运行时（已静态链接）。详见 [Releases](https://github.com/denjhang/ym7129_gui_test_v2/releases)。
+
 ## 功能
 
 ### 鼓垫 (Drum Pad)
