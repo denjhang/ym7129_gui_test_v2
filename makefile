@@ -18,6 +18,17 @@ ensure_dirs:
 
 $(TARGET): $(OBJS)
 	$(CC) -o $@ $^ $(LDFLAGS)
+	@if command -v objdump >/dev/null 2>&1; then \
+		bad=$$(objdump -p $(TARGET) | grep -i "DLL Name" \
+			| grep -iE "libgcc_|libstdc\+\+|libwinpthread|libssp-"); \
+		if [ -n "$$bad" ]; then \
+			echo ""; \
+			echo "ERROR: $(TARGET) imports MinGW runtime DLLs and will fail on machines without MinGW:"; \
+			echo "$$bad" | sed 's/^/  /'; \
+			echo "Add -static to LDFLAGS."; \
+			exit 1; \
+		fi; \
+	fi
 
 $(BUILDDIR)/%.o: %.cpp
 	$(CC) $(CFLAGS) -c -o $@ $<

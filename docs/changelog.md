@@ -12,6 +12,13 @@
 - 由于编译器为 GCC 16.2.0 (MSYS2)，重新编译后 exe 会使用新版运行时；如需在别处运行，
   直接用新的静态 exe，不要从旧机器拷 `libstdc++-6.dll`。
 
+### 防复发
+- `makefile` 链接后自动检查导入表：一旦发现 `libgcc_*` / `libstdc++*` /
+  `libwinpthread*` / `libssp-*`，直接报错并让构建失败，不再生成跑不起来的 exe。
+- `CMakeLists.txt` 在 MinGW 下同样加 `-static`，两条构建路径行为一致。
+- `-static` 必须写在 `LDFLAGS` 里而不是只写 `-static-libgcc -static-libstdc++`：
+  后者会漏掉 `libwinpthread-1.dll`。
+
 ## 2026-06-04 — FM 钢琴键盘支持
 
 ### 新增

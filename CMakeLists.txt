@@ -39,6 +39,11 @@ target_link_libraries(drum_gui PRIVATE
     dwmapi
 )
 
+# Static runtime so the exe runs without libgcc_s_seh-1.dll / libstdc++-6.dll
+if(MINGW)
+    target_link_options(drum_gui PRIVATE -static)
+endif()
+
 # For MSVC: copy DLL to output
 if(EXISTS ${CMAKE_SOURCE_DIR}/ftd2xx64.dll)
     add_custom_command(TARGET drum_gui POST_BUILD
