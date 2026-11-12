@@ -13,8 +13,16 @@ extern "C" {
 // Analyzed by madscient. Reference: opk_register html/Sheet1.html
 // ============================================================
 
-// Test register - set to 0xFF on init
-#define YM7129_REG_TEST         0x01
+// Reg 0x01: Rhythm (drum) L/R output select  (wuqi 数据分析.xlsx 2026-06-23)
+//   bit7=Rhy3_R  bit6=Rhy2_R  bit5=Rhy1_R  bit4=Rhy0_R
+//   bit3=Rhy3_L  bit2=Rhy2_L  bit1=Rhy1_L  bit0=Rhy0_L
+// Writing 0xFF routes all four drum channels to both L and R (init default).
+// NOTE: this was previously mislabelled as a "TEST register" that must be set
+// to 0xFF on init; 0xFF is simply "all drums on both channels".
+#define YM7129_REG_RHY_PAN      0x01
+#define YM7129_RHY_PAN_ALL      0xFF
+// Backward-compatible alias for the old (incorrect) name
+#define YM7129_REG_TEST         YM7129_REG_RHY_PAN
 
 // Reg 0x10-0x1F: Kon / VIB / AM / WS / DM / EG-TYP / ML (wuqi verified)
 // Modulator (odd offset): Bit7=unused, Bit6=VIB, Bit5=DM, Bit4=EG-TYP, Bit3-0=ML
@@ -140,6 +148,12 @@ void ym7129_drum_strike(uint8_t slot, uint8_t channel, uint8_t rhy_type, uint8_t
 
 // Drum mute: set $84 all bits to 0
 void ym7129_drum_mute(uint8_t slot);
+
+// Drum L/R output select (reg $01): ch 0-3, left/right enable bits for that channel
+void ym7129_drum_set_pan(uint8_t slot, uint8_t ch, bool left, bool right);
+
+// Current $01 value (bit0-3 = Rhy0-3 L, bit4-7 = Rhy0-3 R)
+uint8_t ym7129_drum_get_pan(uint8_t slot);
 
 #ifdef __cplusplus
 }

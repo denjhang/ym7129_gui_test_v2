@@ -328,14 +328,9 @@ static void strike_drum(int idx) {
     if (!g_connected || idx < 0 || idx >= 12) return;
     if (g_editingPresetName >= 0) return;  // Don't play while editing preset name
     const drum_pad_t *p = &DRUM_PADS[idx];
-    // Restore all FM L/R to L+R before drum (YM7129 drum output routes through $70-$77)
-    for (int ch = 0; ch < 8; ch++)
-        ym7129_write_reg(g_slot, 0x70 + ch, 0x60);
     ym7129_drum_mute(g_slot);
     log_cmd("Strike: %s (Rhy=%d L/H=%d Vol=%d)", p->name, p->rhy_type, p->lh, g_volume);
     ym7129_drum_strike(g_slot, p->channel, p->rhy_type, p->lh, (uint8_t)g_volume);
-    // Reload FM patch L/R/FB for the piano channel
-    ym7129_write_reg(g_slot, 0x70 + g_pianoChannel, g_fmPatch.feedback_lr);
     g_hitAnim[idx] = 1.0f;
 }
 
@@ -470,58 +465,67 @@ static void RenderDrumPad() {
     ImGui::Spacing();
     ImGui::TextDisabled("[ ] = Volume   Keys: Num0-5,7,8,Num*,Num-,Num/,Num+");
 
-    // Drum register debug: $70-$88 (FM L/R + unknown + drum control)
-    static bool drum_pan_debug = false;
-    static uint8_t drum_pan[25] = {}; // $70-$88 = 25 regs
-    static bool drum_pan_inited = false;
-    if (!drum_pan_inited) {
-        for (int i = 0; i < 8; i++) drum_pan[i] = 0x60; // $70-$77 FM L+R
-        drum_pan[20] = 0x00; // $84 trigger = 0
-        drum_pan_inited = true;
-    }
+    // Drum L/R output select: reg $01, bit0-3 = Rhy0-3 L, bit4-7 = Rhy0-3 R
+    static const char *RHY_NAMES[4] = { "BD", "SD", "C.HH", "O.HH" };
     ImGui::Spacing();
-    ImGui::Checkbox("Reg Debug ($70-$88)", &drum_pan_debug);
-    if (drum_pan_debug) {
+    ImGui::Separator();
+    ImGui::TextDisabled("Drum L/R output ($01)");
+    if (!g_connected) ImGui::BeginDisabled();
+    for (int ch = 0; ch < 4; ch++) {
+        uint8_t pan = ym7129_drum_get_pan(g_slot);
+        bool l_on = (pan >> ch) & 1;
+        bool r_on = (pan >> (ch + 4)) & 1;
+        ImGui::PushID(ch);
+        ImGui::Text("%-5s", RHY_NAMES[ch]);
+        ImGui::SameLine();
+        if (ImGui::Checkbox("L", &l_on)) ym7129_drum_set_pan(g_slot, ch, l_on, r_on);
+        ImGui::SameLine();
+        if (ImGui::Checkbox("R", &r_on)) ym7129_drum_set_pan(g_slot, ch, l_on, r_on);
+        ImGui::PopID();
+    }
+    ImGui::TextDisabled("$01 = $%02X", ym7129_drum_get_pan(g_slot));
+    if (!g_connected) ImGui::EndDisabled();
+
+    // Drum register debug: $80-$84 (type/volume/trigger)
+    static bool drum_reg_debug = false;
+    static uint8_t drum_regs[5] = { 0x83, 0x83, 0x83, 0x83, 0x00 }; // $80-$84
+    ImGui::Spacing();
+    ImGui::Checkbox("Reg Debug ($80-$84)", &drum_reg_debug);
+    if (drum_reg_debug) {
         if (ImGui::BeginTable("RegDebug", 4, ImGuiTableFlags_SizingStretchSame)) {
             ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
             ImGui::TableNextColumn(); ImGui::Text("Reg");
-            ImGui::TableNextColumn(); ImGui::Text("Guess");
+            ImGui::TableNextColumn(); ImGui::Text("Function");
             ImGui::TableNextColumn(); ImGui::Text("Value");
             ImGui::TableNextColumn(); ImGui::Text("Bits");
-            for (int i = 0; i < 25; i++) {
-                int reg = 0x70 + i;
-                const char* guess;
-                if (i < 8)       guess = "FM L/R/FB";
-                else if (i < 16) guess = "Drum Pan?";
-                else if (i < 20) guess = "Drum Ctrl";
-                else             guess = "Drum Trg";
+            for (int i = 0; i < 5; i++) {
+                int reg = 0x80 + i;
+                const char* func = (i < 4) ? "Rhy type/vol" : "Rhy key-on";
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn(); ImGui::Text("$%02X", reg);
-                ImGui::TableNextColumn(); ImGui::Text("%s", guess);
+                ImGui::TableNextColumn(); ImGui::Text("%s", func);
                 ImGui::TableNextColumn();
                 ImGui::PushID(i);
                 ImGui::SetNextItemWidth(50);
-                int pv = drum_pan[i];
-                if (ImGui::InputInt("##reg", &pv, 0)) drum_pan[i] = (uint8_t)(pv & 0xFF);
+                int pv = drum_regs[i];
+                if (ImGui::InputInt("##reg", &pv, 0)) drum_regs[i] = (uint8_t)(pv & 0xFF);
                 ImGui::PopID();
                 ImGui::TableNextColumn();
-                if (i < 8)       ImGui::TextDisabled("R L ?? FB");
-                else if (i < 16) ImGui::TextDisabled("unknown");
-                else if (i < 20) ImGui::TextDisabled("L/H Rhy Vol");
-                else             ImGui::TextDisabled("k3 k2 k1 k0");
+                if (i < 4) ImGui::TextDisabled("L/H Rhy Vol");
+                else       ImGui::TextDisabled("k3 k2 k1 k0");
             }
             ImGui::EndTable();
         }
         ImGui::Spacing();
         if (ImGui::Button("Apply All")) {
-            for (int i = 0; i < 25; i++)
-                ym7129_write_reg(g_slot, 0x70 + i, drum_pan[i]);
-            log_cmd("Reg: $70-$88 applied");
+            for (int i = 0; i < 5; i++)
+                ym7129_write_reg(g_slot, 0x80 + i, drum_regs[i]);
+            log_cmd("Reg: $80-$84 applied");
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("Reset")) {
-            for (int i = 0; i < 8; i++) drum_pan[i] = 0x60;
-            for (int i = 8; i < 25; i++) drum_pan[i] = 0x00;
+            for (int i = 0; i < 4; i++) drum_regs[i] = 0x83;
+            drum_regs[4] = 0x00;
         }
     }
 

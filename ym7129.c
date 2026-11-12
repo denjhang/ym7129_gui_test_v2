@@ -47,6 +47,9 @@ static ym7129_ch_t ch_state[2][YM7129_NUM_CH];
 // Drum trigger state (forward declaration for ym7129_init)
 static uint8_t drum_trigger_state[2] = {0, 0};
 
+// Drum L/R output select per slot ($01). Default: all four channels on L+R.
+static uint8_t drum_pan_state[2] = {YM7129_RHY_PAN_ALL, YM7129_RHY_PAN_ALL};
+
 // ============================================================
 // Low-level register write (hardcoded timing: flush + 90us)
 // YM7129 requires 89.2us between consecutive writes (wuqi verified)
@@ -83,8 +86,9 @@ void ym7129_mute(uint8_t slot) {
 void ym7129_init(uint8_t slot) {
     memset(ch_state[slot], 0, sizeof(ch_state[slot]));
 
-    // Test register must be FF
-    ym7129_write_reg(slot, YM7129_REG_TEST, 0xFF);
+    // $01 = drum L/R output select: 0xFF = all four drum channels on L and R
+    drum_pan_state[slot] = YM7129_RHY_PAN_ALL;
+    ym7129_write_reg(slot, YM7129_REG_RHY_PAN, drum_pan_state[slot]);
 
     // Full register init per waveform analysis section 6:
     // All channels: Carrier MLWS=0x0D (ML=13,KON=0), Carrier SLRR=0x0B (SL=0,RR=11)
@@ -267,9 +271,8 @@ void ym7129_drum_strike(uint8_t slot, uint8_t channel, uint8_t rhy_type, uint8_t
     drum_trigger_state[slot] = 0;
     ym7129_write_reg(slot, 0x84, 0x00);
 
-    // Write $78-$7F = L+R (possibly drum channel pan, undocumented)
-    for (int i = 0; i < 8; i++)
-        ym7129_write_reg(slot, 0x78 + i, 0x60);
+    // $01: drum L/R output select for channels 0-3
+    ym7129_write_reg(slot, YM7129_REG_RHY_PAN, drum_pan_state[slot]);
 
     // Write rhythm type/volume to $80+channel
     uint8_t type_val = (lh << 7) | ((rhy_type & 7) << 4) | (volume & 0x0F);
@@ -282,6 +285,19 @@ void ym7129_drum_strike(uint8_t slot, uint8_t channel, uint8_t rhy_type, uint8_t
 
     drum_trigger_state[slot] |= bit_mask;
     ym7129_write_reg(slot, 0x84, drum_trigger_state[slot]);
+}
+
+void ym7129_drum_set_pan(uint8_t slot, uint8_t ch, bool left, bool right) {
+    if (slot > 1 || ch > 3) return;
+    uint8_t lm = (uint8_t)(1 << ch);        // bit0-3 = Rhy0-3 L
+    uint8_t rm = (uint8_t)(1 << (ch + 4));  // bit4-7 = Rhy0-3 R
+    if (left)  drum_pan_state[slot] |= lm;  else drum_pan_state[slot] &= (uint8_t)~lm;
+    if (right) drum_pan_state[slot] |= rm;  else drum_pan_state[slot] &= (uint8_t)~rm;
+    ym7129_write_reg(slot, YM7129_REG_RHY_PAN, drum_pan_state[slot]);
+}
+
+uint8_t ym7129_drum_get_pan(uint8_t slot) {
+    return slot > 1 ? 0 : drum_pan_state[slot];
 }
 
 void ym7129_drum_mute(uint8_t slot) {
