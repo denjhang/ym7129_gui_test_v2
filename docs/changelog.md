@@ -4,8 +4,10 @@
 
 ### 修复
 - 鼓垫原来只有 12 个（6 类型），漏掉 Rhy.No 6。现补为 14 个：
-  BD / SD / C.HH / O.HH / Tom / Ride / Rhy6，每个都有 H、L 两个键。
-- 键盘映射补两组：`Num3` / `Num6` 对应 Rhy6 的 H / L。
+  BD / SD / C.HH / O.HH / Tom / Ride / All，每个都有 H、L 两个键。
+- Rhy.No 6 的真实行为是**同时播放全部采样**（用户确认），不是 madscient 表里写的
+  "Reverse all"，所以界面上标为 `All`。
+- 键盘映射补两组：`Num3` / `Num6` 对应 All 的 H / L。
 - 鼓垫绘制循环改用 `NUM_DRUM_PADS`，不再写死 6 行。
 
 ### 修复：L/R 一直居中不生效

@@ -52,8 +52,9 @@ static const drum_pad_t DRUM_PADS[14] = {
     { "O.HH H",   3, 0, 0 }, { "O.HH L",   3, 1, 0 },
     { "Tom H",    4, 0, 0 }, { "Tom L",    4, 1, 0 },
     { "Ride H",   5, 0, 0 }, { "Ride L",   5, 1, 0 },
-    // Rhy.No 6: xlsx labels 6/7 "Reverse all"; project captures call it Cymbal/Rim
-    { "Rhy6 H",   6, 0, 0 }, { "Rhy6 L",   6, 1, 0 },
+    // Rhy.No 6: plays all samples at once (user-confirmed; the datasheet's
+    // "Reverse all" label is wrong)
+    { "All H",    6, 0, 0 }, { "All L",    6, 1, 0 },
 };
 
 #define NUM_DRUM_PADS 14

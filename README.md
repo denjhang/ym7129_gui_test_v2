@@ -5,7 +5,7 @@ YM7129 音色编辑器 + 鼓垫 + FM 钢琴键盘，基于 ImGui + DirectX11，�
 ## 功能
 
 ### 鼓垫 (Drum Pad)
-- 14 个鼓垫按钮：BD / SD / C.HH / O.HH / Tom / Ride / Rhy6 × 2 (H/L)
+- 14 个鼓垫按钮：BD / SD / C.HH / O.HH / Tom / Ride / All × 2 (H/L)
 - 鼠标点击触发 + 击打动画
 - 键盘快捷键：`Num0 . 1 2 4 5 7 8 * - / + 3 6`（每个鼓类型一对）
 - `[` `]` 调节音量 (0-15)
@@ -76,7 +76,7 @@ YM7129 为 2-op FM 合成器，兼容 YM2413 (OPLL) 风格。每个通道有 2 �
 | `$50+$off` | bit7-4=BLK, bit3-0=FNUM-H | 频率高位 |
 | `$60+$off` | bit7-0 | FNUM-L 频率低位 |
 | `$70+ch` | bit7=FM/PM, bit6=R, bit5=L, bit2-0=FB | L/R/FB 控制 |
-| `$80+ch` | bit7=L/H, bit6-4=Rhy No, bit3-0=Vol | 鼓通道类型/音量 |
+| `$80+ch` | bit7=L/H, bit6-4=Rhy No, bit3-0=Vol | 鼓通道类型/音量（Rhy No 0-5 = BD/SD/C.HH/O.HH/Tom/Ride，6 = 同时播放全部采样） |
 | `$84` | bit3-0 = k3 k2 k1 k0 | 鼓通道 key-on，0→1 上升沿触发一次 |
 
 > `$01` 早期被误标为 "TEST 寄存器，初始化必须写 `$FF`"。按 2026-06-23 更新的
