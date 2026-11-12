@@ -1,7 +1,7 @@
 /**
  * YM7129 Drum Pad - ImGui + DX11
  *
- * 12 drum pads (6 types x L/H), mouse + keyboard.
+ * 14 drum pads (7 types x L/H), mouse + keyboard.
  * Connect/Disconnect/Reset. Delay slider 0-200us.
  * Uses verified 3-byte raw protocol: [slot, 0x80, addr] [slot, 0x81, data]
  */
@@ -41,27 +41,40 @@ typedef struct {
     uint8_t    channel;
 } drum_pad_t;
 
-static const drum_pad_t DRUM_PADS[12] = {
-    { "BD  H",  0, 0, 0 }, { "BD  L",  0, 1, 0 },
-    { "SD  H",  1, 0, 0 }, { "SD  L",  1, 1, 0 },
-    { "C.HH H", 2, 0, 0 }, { "C.HH L", 2, 1, 0 },
-    { "O.HH H", 3, 0, 0 }, { "O.HH L", 3, 1, 0 },
-    { "Tom H",  4, 0, 0 }, { "Tom L",  4, 1, 0 },
-    { "Ride H", 5, 0, 0 }, { "Ride L", 5, 1, 0 },
+static const drum_pad_t DRUM_PADS[14] = {
+    // All pads drive rhythm channel 0 ($80). Pan ($01) is per rhythm channel,
+    // so panning 14 pads independently is done by writing $01 per strike
+    // (only one drum sounds at a time) instead of spreading the pads over
+    // $80-$83, which previously produced wrong instruments.
+    { "BD  H",    0, 0, 0 }, { "BD  L",    0, 1, 0 },
+    { "SD  H",    1, 0, 0 }, { "SD  L",    1, 1, 0 },
+    { "C.HH H",   2, 0, 0 }, { "C.HH L",   2, 1, 0 },
+    { "O.HH H",   3, 0, 0 }, { "O.HH L",   3, 1, 0 },
+    { "Tom H",    4, 0, 0 }, { "Tom L",    4, 1, 0 },
+    { "Ride H",   5, 0, 0 }, { "Ride L",   5, 1, 0 },
+    // Rhy.No 6: xlsx labels 6/7 "Reverse all"; project captures call it Cymbal/Rim
+    { "Rhy6 H",   6, 0, 0 }, { "Rhy6 L",   6, 1, 0 },
 };
 
-// VK mapping: 0., 12, 45, 78, */-, +  (6 groups x 2 keys)
-static const int PAD_VK[12] = {
+#define NUM_DRUM_PADS 14
+
+// Per-pad L/R output state (default both on)
+static bool g_padL[NUM_DRUM_PADS] = {};
+static bool g_padR[NUM_DRUM_PADS] = {};
+
+// VK mapping, one pair per drum type
+static const int PAD_VK[NUM_DRUM_PADS] = {
     VK_NUMPAD0, 0x6E, /* VK_DECIMAL */
     VK_NUMPAD1, VK_NUMPAD2,
     VK_NUMPAD4, VK_NUMPAD5,
     VK_NUMPAD7, VK_NUMPAD8,
     VK_MULTIPLY, VK_SUBTRACT,
     VK_DIVIDE,   VK_ADD,
+    VK_NUMPAD3,  VK_NUMPAD6,
 };
 
-static const char *PAD_KEYNAMES[12] = {
-    "0.",".","1","2","4","5","7","8","*","-","/","+"
+static const char *PAD_KEYNAMES[NUM_DRUM_PADS] = {
+    "0", ".", "1", "2", "4", "5", "7", "8", "*", "-", "/", "+", "3", "6"
 };
 
 static void on_key_down(int vk); // forward declaration, defined after strike_drum
@@ -74,7 +87,7 @@ static bool    g_connected = false;
 static uint8_t g_slot = 0;
 static int     g_volume = 0;
 static bool    g_keyStates[256] = {};
-static float   g_hitAnim[12] = {};
+static float   g_hitAnim[NUM_DRUM_PADS] = {};
 
 // ============================================================
 // Log component (ported from DMPlayer ym2163)
@@ -325,13 +338,20 @@ static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 // Drum actions
 // ============================================================
 static void strike_drum(int idx) {
-    if (!g_connected || idx < 0 || idx >= 12) return;
+    if (!g_connected || idx < 0 || idx >= NUM_DRUM_PADS) return;
     if (g_editingPresetName >= 0) return;  // Don't play while editing preset name
     const drum_pad_t *p = &DRUM_PADS[idx];
     ym7129_drum_mute(g_slot);
-    log_cmd("Strike: %s (Rhy=%d L/H=%d Vol=%d)", p->name, p->rhy_type, p->lh, g_volume);
+    // $01 pan is per rhythm channel; apply this pad's L/R just before the hit
+    ym7129_drum_set_pan(g_slot, p->channel, g_padL[idx], g_padR[idx]);
+    log_cmd("Strike: %s (Rhy=%d L/H=%d Vol=%d L/R=%d%d)", p->name, p->rhy_type, p->lh,
+            g_volume, g_padL[idx] ? 1 : 0, g_padR[idx] ? 1 : 0);
     ym7129_drum_strike(g_slot, p->channel, p->rhy_type, p->lh, (uint8_t)g_volume);
     g_hitAnim[idx] = 1.0f;
+}
+
+static void init_drum_pan_defaults(void) {
+    for (int i = 0; i < NUM_DRUM_PADS; i++) { g_padL[i] = true; g_padR[i] = true; }
 }
 
 static void on_key_down(int vk) {
@@ -339,7 +359,7 @@ static void on_key_down(int vk) {
     if (g_keyStates[vk]) return; // ignore auto-repeat (same as DMPlayer)
     g_keyStates[vk] = true;
     // Drum pads (numpad)
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < NUM_DRUM_PADS; i++) {
         if (vk == PAD_VK[i]) { strike_drum(i); return; }
     }
     // Piano keys (main keyboard)
@@ -437,9 +457,10 @@ static void RenderDrumPad() {
     float padW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
     float padH = 42.0f;
 
-    for (int row = 0; row < 6; row++) {
+    for (int row = 0; row < (NUM_DRUM_PADS + 1) / 2; row++) {
         for (int col = 0; col < 2; col++) {
             int i = row * 2 + col;
+            if (i >= NUM_DRUM_PADS) break;
             ImGui::PushID(i);
 
             if (g_hitAnim[i] > 0.0f) {
@@ -463,25 +484,41 @@ static void RenderDrumPad() {
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("[ ] = Volume   Keys: Num0-5,7,8,Num*,Num-,Num/,Num+");
+    ImGui::TextDisabled("[ ] = Volume   Keys: pads=Num0/./1/2/4/5/7/8/*/-//+/3/6");
 
-    // Drum L/R output select: reg $01, bit0-3 = Rhy0-3 L, bit4-7 = Rhy0-3 R
-    static const char *RHY_NAMES[4] = { "BD", "SD", "C.HH", "O.HH" };
+    // Per-pad L/R output ($01). Pan is per rhythm channel, and every pad uses
+    // channel 0, so the value is written right before each strike.
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextDisabled("Drum L/R output ($01)");
+    ImGui::TextDisabled("Drum L/R output ($01) - applied per hit");
     if (!g_connected) ImGui::BeginDisabled();
-    for (int ch = 0; ch < 4; ch++) {
-        uint8_t pan = ym7129_drum_get_pan(g_slot);
-        bool l_on = (pan >> ch) & 1;
-        bool r_on = (pan >> (ch + 4)) & 1;
-        ImGui::PushID(ch);
-        ImGui::Text("%-5s", RHY_NAMES[ch]);
-        ImGui::SameLine();
-        if (ImGui::Checkbox("L", &l_on)) ym7129_drum_set_pan(g_slot, ch, l_on, r_on);
-        ImGui::SameLine();
-        if (ImGui::Checkbox("R", &r_on)) ym7129_drum_set_pan(g_slot, ch, l_on, r_on);
-        ImGui::PopID();
+    if (ImGui::BeginTable("DrumPan", 3,
+            ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_BordersInnerV)) {
+        ImGui::TableSetupColumn("Pad", ImGuiTableColumnFlags_WidthFixed, 210.0f);
+        ImGui::TableSetupColumn("L",   ImGuiTableColumnFlags_WidthFixed, 40.0f);
+        ImGui::TableSetupColumn("R",   ImGuiTableColumnFlags_WidthFixed, 40.0f);
+        for (int i = 0; i < NUM_DRUM_PADS; i++) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::Text("%s", DRUM_PADS[i].name);
+            ImGui::TableNextColumn();
+            ImGui::PushID(i);
+            ImGui::Checkbox("##L", &g_padL[i]);
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##R", &g_padR[i]);
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    ImGui::Spacing();
+    ImGui::SameLine();
+    if (ImGui::SmallButton("All L+R")) init_drum_pan_defaults();
+    ImGui::SameLine();
+    if (ImGui::SmallButton("All L only")) {
+        for (int i = 0; i < NUM_DRUM_PADS; i++) { g_padL[i] = true; g_padR[i] = false; }
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("All R only")) {
+        for (int i = 0; i < NUM_DRUM_PADS; i++) { g_padL[i] = false; g_padR[i] = true; }
     }
     ImGui::TextDisabled("$01 = $%02X", ym7129_drum_get_pan(g_slot));
     if (!g_connected) ImGui::EndDisabled();
@@ -1015,6 +1052,7 @@ static void RenderPiano() {
 // WinMain
 // ============================================================
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
+    init_drum_pan_defaults();
     // Set DPI awareness (Per Monitor V2) - like DMPlayer
     HMODULE user32 = LoadLibraryA("user32.dll");
     if (user32) {
@@ -1132,7 +1170,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
         // Decay hit animations + piano key levels
         float dt = io.DeltaTime;
-        for (int i = 0; i < 12; i++) {
+        for (int i = 0; i < NUM_DRUM_PADS; i++) {
             if (g_hitAnim[i] > 0.0f) {
                 g_hitAnim[i] -= dt * 6.0f;
                 if (g_hitAnim[i] < 0.0f) g_hitAnim[i] = 0.0f;
