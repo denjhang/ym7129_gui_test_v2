@@ -2,7 +2,7 @@
 BUILDDIR = build
 CC       = g++
 CFLAGS   = -Wall -O2 -I. -Iimgui -mwindows
-LDFLAGS  = -L. -lftd2xx -lws2_32 -ld3d11 -ldxgi -ld3dcompiler -ldwmapi -mwindows
+LDFLAGS  = -L. -lftd2xx -lws2_32 -ld3d11 -ldxgi -ld3dcompiler -ldwmapi -mwindows -static
 
 IMGUI_SRCS = imgui/imgui.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp \
              imgui/imgui_widgets.cpp imgui/imgui_impl_win32.cpp imgui/imgui_impl_dx11.cpp

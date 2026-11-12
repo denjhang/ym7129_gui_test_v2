@@ -82,6 +82,9 @@ make
 
 依赖：MinGW-w64, FTDI D2XX 库 (`libftd2xx.a`, `ftd2xx64.dll`)
 
+链接使用 `-static`，因此运行时不需要额外分发 `libgcc_s_seh-1.dll` 和 `libstdc++-6.dll`；
+唯一需要随 exe 一起拷贝的动态库是 `ftd2xx64.dll`。
+
 ## 运行
 
 ```bash

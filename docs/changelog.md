@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-12 — 静态链接修复运行时 DLL 缺失
+
+### 修复
+- exe 启动报 "找不到 libgcc_s_seh-1.dll / libstdc++-6.dll"：链接参数改为 `-static`，
+  把 MinGW(GCC 16.2) 的 C/C++ 运行时和 libwinpthread 全部静态链接进 exe。
+- 现在 `build/drum_gui.exe` 只依赖系统 DLL + `ftd2xx64.dll`，直接双击可运行，
+  不需要额外的运行时 DLL 或安装 MinGW。
+
+### 注意
+- 由于编译器为 GCC 16.2.0 (MSYS2)，重新编译后 exe 会使用新版运行时；如需在别处运行，
+  直接用新的静态 exe，不要从旧机器拷 `libstdc++-6.dll`。
+
 ## 2026-06-04 — FM 钢琴键盘支持
 
 ### 新增
